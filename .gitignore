@@ -42,3 +42,37 @@ __screenshots__/
 # System files
 .DS_Store
 Thumbs.db
+
+# Environment variables (Sensitive)
+.env
+.env.local
+.env.*.local
+.env.development
+.env.test
+.env.production
+!.env.example
+
+# Go
+api/index
+index
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Docker
+.docker
+*.db
+postgres_data/
+
+# OS specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
