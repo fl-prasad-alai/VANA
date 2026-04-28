@@ -1,0 +1,89 @@
+services:
+  # React Frontend (Vite)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: vana-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - NODE_ENV=development
+      - VITE_API_URL=http://localhost:3000/api
+    volumes:
+      - ./src:/app/src
+      - ./public:/app/public
+      - ./package.json:/app/package.json
+      - ./tailwind.config.js:/app/tailwind.config.js
+      - ./tsconfig.json:/app/tsconfig.json
+      - ./vite.config.ts:/app/vite.config.ts
+    command: npm run dev -- --host
+    networks:
+      - emerald-moss-net
+    depends_on:
+      - backend
+
+  # Go Backend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: vana-backend
+    ports:
+      - "3000:3000"
+    environment:
+      - JWT_SECRET=your-super-secret-key-change-in-production
+      - SUPABASE_URL=postgres
+      - SUPABASE_DB_USER=postgres
+      - SUPABASE_DB_PASSWORD=postgres
+      - SUPABASE_DB_NAME=emerald_moss
+      - PORT=3000
+    volumes:
+      - ./api:/app/api
+    command: ./index
+    networks:
+      - emerald-moss-net
+    depends_on:
+      - postgres
+
+  # PostgreSQL Database
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: emerald-moss-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: emerald_moss
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docs/SUPABASE_SCHEMA.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    networks:
+      - emerald-moss-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # pgAdmin for database management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: emerald-moss-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@emerald-moss.local
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    networks:
+      - emerald-moss-net
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
+
+networks:
+  emerald-moss-net:
+    driver: bridge

@@ -1,0 +1,742 @@
+// src/theme.scss
+// Emerald Moss: Nature-Inspired Biophilic Design System
+// Vision: High-empathy, low-friction mental health companion
+
+// ============================================================================
+// COLOR PALETTE: "Morning Mist" (Light) & "Deep Evergreen" (Dark)
+// ============================================================================
+
+$moss-light: #F4F7F4;              // Morning Mist - Light background
+$moss-dark: #0B1A0E;               // Deep Evergreen - Dark background
+$moss-primary: #2D5A27;            // Primary Action - Forest Green
+$moss-secondary: #3E7A36;          // Hover States - Deeper Green
+$moss-accent: #7AA973;             // Highlights - Light Green
+$moss-muted: #9DB39B;              // Muted Text - Soft Green
+$moss-border: #C8D5C6;             // Borders (Light)
+$moss-border-dark: #1F3520;        // Borders (Dark)
+
+// Glass Morphism Base Colors
+$glass-light: rgba(244, 247, 244, 0.15);    // Light glass with 15% opacity
+$glass-light-strong: rgba(244, 247, 244, 0.25);
+$glass-dark: rgba(11, 26, 14, 0.25);        // Dark glass with 25% opacity
+$glass-dark-strong: rgba(11, 26, 14, 0.4);
+
+// Sentiment Colors (Emotion-Aware UI)
+$sentiment-positive: #4CAF50;      // Green - Positive/Calm
+$sentiment-neutral: #FF9800;       // Orange - Neutral
+$sentiment-negative: #F44336;      // Red - Negative/Anxious
+$sentiment-critical: #9C27B0;      // Purple - Crisis/Critical
+
+// ============================================================================
+// TRANSITIONS & ANIMATIONS
+// ============================================================================
+
+@keyframes breath-sync {
+  0%, 100% {
+    transform: scale(0.95);
+    opacity: 0.6;
+    box-shadow: 0 0 0 0 rgba(45, 90, 39, 0.4);
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+    box-shadow: 0 0 0 20px rgba(45, 90, 39, 0);
+  }
+}
+
+@keyframes fade-in {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-in-left {
+  0% {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slide-in-right {
+  0% {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pulse-gentle {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+@keyframes sentiment-shift {
+  0% {
+    background-color: rgba(45, 90, 39, 0);
+  }
+  100% {
+    background-color: rgba(45, 90, 39, 0.05);
+  }
+}
+
+@keyframes spin-slow {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+// ============================================================================
+// GLASSMORPHISM EFFECT
+// ============================================================================
+
+@mixin glass-morphism($color: $glass-light, $blur: 12px) {
+  background: $color;
+  backdrop-filter: blur($blur);
+  -webkit-backdrop-filter: blur($blur);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0.75rem;
+}
+
+@mixin glass-morphism-dark($color: $glass-dark, $blur: 12px) {
+  background: $color;
+  backdrop-filter: blur($blur);
+  -webkit-backdrop-filter: blur($blur);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.75rem;
+}
+
+// ============================================================================
+// SHADOW SYSTEM (Depth & Elevation)
+// ============================================================================
+
+$shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+$shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+$shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+$shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+$shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+
+// Inset shadows for depth
+$shadow-inset: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06);
+
+// ============================================================================
+// UTILITY CLASSES
+// ============================================================================
+
+.glass-panel {
+  @include glass-morphism($glass-light);
+
+  &.dark {
+    @include glass-morphism-dark($glass-dark);
+  }
+
+  &.strong {
+    @include glass-morphism($glass-light-strong);
+
+    &.dark {
+      @include glass-morphism-dark($glass-dark-strong);
+    }
+  }
+
+  &.hover {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+    &:hover {
+      background: $glass-light-strong;
+      transform: translateY(-2px);
+      box-shadow: $shadow-lg;
+    }
+
+    &.dark:hover {
+      background: $glass-dark-strong;
+    }
+  }
+}
+
+// ============================================================================
+// TEXT & TYPOGRAPHY
+// ============================================================================
+
+.text-moss-primary {
+  color: $moss-primary;
+}
+
+.text-moss-secondary {
+  color: $moss-secondary;
+}
+
+.text-moss-accent {
+  color: $moss-accent;
+}
+
+.text-moss-muted {
+  color: $moss-muted;
+}
+
+.dark .text-moss-primary {
+  color: $moss-accent;
+}
+
+.dark .text-moss-secondary {
+  color: $moss-muted;
+}
+
+// ============================================================================
+// CHAT BUBBLES (User & AI Messages)
+// ============================================================================
+
+.chat-bubble {
+  @include glass-morphism($glass-light);
+  padding: 1rem;
+  margin-bottom: 1rem;
+  animation: fade-in 0.5s ease-out;
+
+  &.user {
+    margin-left: auto;
+    max-width: 85%;
+    background: $moss-primary;
+    color: white;
+    border-radius: 1.5rem 0.5rem 1.5rem 1.5rem;
+    animation: slide-in-right 0.3s ease-out;
+
+    &.dark {
+      background: $moss-secondary;
+    }
+  }
+
+  &.ai {
+    max-width: 85%;
+    border-radius: 0.5rem 1.5rem 1.5rem 1.5rem;
+    animation: slide-in-left 0.3s ease-out;
+
+    &.dark {
+      @include glass-morphism-dark($glass-dark-strong);
+      color: $moss-light;
+    }
+  }
+
+  &.sentiment-positive {
+    border-left: 4px solid $sentiment-positive;
+  }
+
+  &.sentiment-neutral {
+    border-left: 4px solid $sentiment-neutral;
+  }
+
+  &.sentiment-negative {
+    border-left: 4px solid $sentiment-negative;
+  }
+
+  &.sentiment-critical {
+    border-left: 4px solid $sentiment-critical;
+    background: rgba(156, 39, 176, 0.1);
+  }
+}
+
+// ============================================================================
+// BUTTONS
+// ============================================================================
+
+.btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 0.5rem;
+  font-weight: 500;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  font-size: 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+
+  &.btn-primary {
+    background: $moss-primary;
+    color: white;
+
+    &:hover {
+      background: $moss-secondary;
+      box-shadow: $shadow-lg;
+      transform: translateY(-2px);
+    }
+
+    &:active {
+      transform: translateY(0);
+    }
+
+    &.dark {
+      background: $moss-accent;
+      color: $moss-dark;
+
+      &:hover {
+        background: $moss-primary;
+      }
+    }
+  }
+
+  &.btn-secondary {
+    background: $glass-light;
+    color: $moss-primary;
+    border: 1px solid $moss-border;
+
+    @include glass-morphism($glass-light);
+
+    &:hover {
+      background: $glass-light-strong;
+      box-shadow: $shadow-md;
+    }
+
+    &.dark {
+      @include glass-morphism-dark($glass-dark);
+      color: $moss-accent;
+      border-color: $moss-border-dark;
+
+      &:hover {
+        @include glass-morphism-dark($glass-dark-strong);
+      }
+    }
+  }
+
+  &.btn-outline {
+    background: transparent;
+    border: 2px solid $moss-primary;
+    color: $moss-primary;
+
+    &:hover {
+      background: $moss-primary;
+      color: white;
+    }
+
+    &.dark {
+      border-color: $moss-accent;
+      color: $moss-accent;
+
+      &:hover {
+        background: $moss-accent;
+        color: $moss-dark;
+      }
+    }
+  }
+
+  &.btn-ghost {
+    background: transparent;
+    color: $moss-primary;
+
+    &:hover {
+      background: $glass-light;
+      border-radius: 0.375rem;
+    }
+
+    &.dark {
+      color: $moss-accent;
+
+      &:hover {
+        background: $glass-dark;
+      }
+    }
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none !important;
+  }
+}
+
+// ============================================================================
+// INPUT FIELDS & FORMS
+// ============================================================================
+
+.form-input,
+.form-textarea {
+  @include glass-morphism($glass-light);
+  color: $moss-dark;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  transition: all 0.3s ease;
+  width: 100%;
+  box-sizing: border-box;
+
+  &::placeholder {
+    color: $moss-muted;
+  }
+
+  &:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px $moss-primary, $shadow-lg;
+    transform: translateY(-1px);
+  }
+
+  &.dark {
+    @include glass-morphism-dark($glass-dark);
+    color: $moss-light;
+
+    &::placeholder {
+      color: $moss-border-dark;
+    }
+
+    &:focus {
+      box-shadow: 0 0 0 2px $moss-accent, $shadow-lg;
+    }
+  }
+
+  &.error {
+    border-color: $sentiment-negative;
+
+    &:focus {
+      box-shadow: 0 0 0 2px $sentiment-negative;
+    }
+  }
+
+  &.success {
+    border-color: $sentiment-positive;
+
+    &:focus {
+      box-shadow: 0 0 0 2px $sentiment-positive;
+    }
+  }
+}
+
+.form-textarea {
+  resize: vertical;
+  min-height: 100px;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.form-group {
+  margin-bottom: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.form-label {
+  font-weight: 500;
+  font-size: 0.95rem;
+  color: $moss-primary;
+
+  .dark & {
+    color: $moss-accent;
+  }
+
+  &.required::after {
+    content: ' *';
+    color: $sentiment-negative;
+  }
+}
+
+.form-error {
+  color: $sentiment-negative;
+  font-size: 0.85rem;
+  animation: fade-in 0.3s ease-out;
+}
+
+.form-hint {
+  color: $moss-muted;
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+// ============================================================================
+// BREATH SYNC INDICATOR (Voice Animation)
+// ============================================================================
+
+.breath-sync-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+
+  .breath-sync-circle {
+    position: relative;
+    width: 8rem;
+    height: 8rem;
+    border-radius: 50%;
+    @include glass-morphism($glass-light);
+    box-shadow: $shadow-xl;
+    animation: breath-sync 4s ease-in-out infinite;
+    cursor: pointer;
+    transition: all 0.3s ease;
+
+    &:hover {
+      transform: scale(1.05);
+    }
+
+    &.dark {
+      @include glass-morphism-dark($glass-dark);
+    }
+
+    .breath-sync-inner {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 75%;
+      height: 75%;
+      border-radius: 50%;
+      background: $moss-accent;
+      opacity: 0.5;
+      filter: blur(0.5rem);
+    }
+
+    .breath-sync-icon {
+      position: relative;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+      color: $moss-primary;
+      font-size: 2rem;
+
+      &.dark {
+        color: $moss-light;
+      }
+    }
+
+    &.listening {
+      animation: breath-sync 4s ease-in-out infinite;
+
+      .breath-sync-pulse {
+        animation: pulse-gentle 2s ease-in-out infinite;
+      }
+    }
+
+    &.not-listening {
+      animation: none;
+      opacity: 0.7;
+    }
+  }
+}
+
+// ============================================================================
+// LOADING & SPINNER
+// ============================================================================
+
+.spinner {
+  width: 2rem;
+  height: 2rem;
+  border: 3px solid $glass-light;
+  border-top-color: $moss-primary;
+  border-radius: 50%;
+  animation: spin-slow 1s linear infinite;
+
+  &.dark {
+    border-color: $glass-dark;
+    border-top-color: $moss-accent;
+  }
+
+  &.small {
+    width: 1rem;
+    height: 1rem;
+    border-width: 2px;
+  }
+
+  &.large {
+    width: 3rem;
+    height: 3rem;
+    border-width: 4px;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    $glass-light 0%,
+    $glass-light-strong 50%,
+    $glass-light 100%
+  );
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite;
+
+  &.dark {
+    background: linear-gradient(
+      90deg,
+      $glass-dark 0%,
+      $glass-dark-strong 50%,
+      $glass-dark 100%
+    );
+  }
+}
+
+// ============================================================================
+// ALERTS & NOTIFICATIONS
+// ============================================================================
+
+.alert {
+  padding: 1rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  animation: fade-in 0.3s ease-out;
+
+  &.alert-success {
+    background: rgba(76, 175, 80, 0.15);
+    border-left: 4px solid $sentiment-positive;
+    color: $sentiment-positive;
+  }
+
+  &.alert-error {
+    background: rgba(244, 67, 54, 0.15);
+    border-left: 4px solid $sentiment-negative;
+    color: $sentiment-negative;
+  }
+
+  &.alert-warning {
+    background: rgba(255, 152, 0, 0.15);
+    border-left: 4px solid $sentiment-neutral;
+    color: $sentiment-neutral;
+  }
+
+  &.alert-info {
+    background: rgba(45, 90, 39, 0.15);
+    border-left: 4px solid $moss-primary;
+    color: $moss-primary;
+  }
+
+  &.alert-crisis {
+    background: rgba(156, 39, 176, 0.15);
+    border-left: 4px solid $sentiment-critical;
+    color: $sentiment-critical;
+    font-weight: 600;
+    animation: pulse-gentle 1.5s ease-in-out infinite;
+  }
+}
+
+// ============================================================================
+// CARDS & CONTAINERS
+// ============================================================================
+
+.card {
+  @include glass-morphism($glass-light);
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+  box-shadow: $shadow-md;
+
+  &.dark {
+    @include glass-morphism-dark($glass-dark);
+  }
+
+  &.elevated {
+    box-shadow: $shadow-lg;
+  }
+
+  &.interactive {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+
+    &:hover {
+      box-shadow: $shadow-lg;
+      transform: translateY(-4px);
+    }
+  }
+}
+
+// ============================================================================
+// RESPONSIVE DESIGN
+// ============================================================================
+
+@media (max-width: 768px) {
+  .chat-bubble {
+    &.user,
+    &.ai {
+      max-width: 95%;
+    }
+  }
+
+  .btn {
+    padding: 0.65rem 1.25rem;
+    font-size: 0.95rem;
+  }
+
+  .breath-sync-container {
+    padding: 1.5rem;
+
+    .breath-sync-circle {
+      width: 6rem;
+      height: 6rem;
+    }
+  }
+}
+
+// ============================================================================
+// DARK MODE GLOBAL ADJUSTMENTS
+// ============================================================================
+
+:root.dark {
+  background-color: $moss-dark;
+  color: $moss-light;
+}
+
+// ============================================================================
+// ACCESSIBILITY
+// ============================================================================
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+// Focus visible for keyboard navigation
+:focus-visible {
+  outline: 2px solid $moss-primary;
+  outline-offset: 2px;
+
+  .dark &:not(button) {
+    outline-color: $moss-accent;
+  }
+}
+
+// ============================================================================
+// PRINT STYLES
+// ============================================================================
+
+@media print {
+  .btn,
+  .spinner,
+  .breath-sync-container {
+    display: none;
+  }
+
+  .glass-panel,
+  .card {
+    box-shadow: none;
+    border: 1px solid #ccc;
+  }
+}

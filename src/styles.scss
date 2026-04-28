@@ -1,1 +1,31 @@
-/* You can add global styles to this file, and also import other style files */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Morning Mist - Light Mode */
+  --bg-color: #F4F7F4;
+  --text-color: #0B1A0E;
+}
+
+.dark {
+  /* Deep Evergreen - Dark Mode */
+  --bg-color: #0B1A0E;
+  --text-color: #F4F7F4;
+}
+
+body {
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  transition: background-color 0.5s ease, color 0.5s ease;
+  font-family: 'Inter', sans-serif;
+}
+
+/* Glassmorphism Classes */
+.glass-panel {
+  @apply bg-moss-glass backdrop-blur-glass border border-white/20 rounded-2xl shadow-lg;
+}
+
+.dark .glass-panel {
+  @apply bg-moss-glassDark border-white/10;
+}

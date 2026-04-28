@@ -1,0 +1,33 @@
+# Dockerfile for Go Backend
+
+FROM golang:1.22-alpine AS builder
+
+WORKDIR /app
+
+# Install git for downloading dependencies
+RUN apk add --no-cache git
+
+# Copy source code (including go.mod)
+COPY api/ .
+
+# Download and tidy dependencies (needs source code to see imports)
+RUN go mod tidy
+
+# Build the application
+RUN CGO_ENABLED=0 GOOS=linux go build -o index main.go
+
+# Final stage
+FROM alpine:latest
+
+RUN apk --no-cache add ca-certificates
+
+WORKDIR /root/
+
+# Copy the binary from builder
+COPY --from=builder /app/index .
+
+# Expose port
+EXPOSE 3000
+
+# Run the application
+CMD ["./index"]
