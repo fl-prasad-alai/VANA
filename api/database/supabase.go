@@ -75,13 +75,7 @@ func (sc *SupabaseClient) CreateUser(ctx context.Context, user *User) error {
 	}
 	defer tx.Rollback()
 
-	// 1. Insert into auth.users (Mock Auth)
-	_, err = tx.ExecContext(ctx, "INSERT INTO auth.users (id, email) VALUES ($1, $2)", user.ID, user.Email)
-	if err != nil {
-		return fmt.Errorf("auth.users insert failed: %w", err)
-	}
-
-	// 2. Insert into public.users
+	// 1. Insert into public.users
 	_, err = tx.ExecContext(
 		ctx,
 		`INSERT INTO public.users (id, email, full_name, privacy_mode, consent_therapeutic, consent_data_collection, consent_research, is_active)
