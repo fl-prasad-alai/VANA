@@ -9,14 +9,16 @@ import (
 	"time"
 
 	"emerald-moss-api/database"
+	"emerald-moss-api/orchestration"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 )
 
 var (
-	dbClient  *database.SupabaseClient
-	jwtSecret = []byte("your-super-secret-key-change-in-production")
+	dbClient   *database.SupabaseClient
+	aiBalancer *orchestration.MultiProviderBalancer
+	jwtSecret  = []byte("your-super-secret-key-change-in-production")
 )
 
 func main() {
@@ -41,9 +43,18 @@ func main() {
 
 	client, err := database.NewSupabaseClient(config)
 	if err != nil {
-		log.Printf("Warning: Database connection failed (checking for health later): %v", err)
+		log.Printf("Warning: Database connection failed: %v", err)
 	}
 	dbClient = client
+
+	// Initialize AI Balancer
+	groqKey := os.Getenv("GROQ_API_KEY")
+	geminiKey := os.Getenv("GEMINI_API_KEY")
+
+	groq := orchestration.NewGroqClient(groqKey, "llama-3.1-8b-instant")
+	gemini := orchestration.NewGeminiClient(geminiKey, "gemini-1.5-flash")
+	
+	aiBalancer = orchestration.NewMultiProviderBalancer(groq, gemini, 30, 15)
 
 	mux := http.NewServeMux()
 
@@ -206,13 +217,22 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Simple mock response
-	response := "I'm here to support you. That sounds like something we should explore. How does that make you feel?"
+	ctx := r.Context()
+	
+	// Use AI Balancer (Groq/Gemini Orchestration)
+	response, provider, _, err := aiBalancer.HandleChat(ctx, req.Message, nil, false)
+	if err != nil {
+		log.Printf("AI Error: %v", err)
+		// Fallback to simple message if AI fails
+		response = "I'm here to support you. That sounds like something we should explore. How does that make you feel?"
+		provider = "mock"
+	}
 	
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"id":        uuid.New().String(),
 		"response":  response,
+		"provider":  provider,
 		"sentiment": 0.5,
 		"timestamp": time.Now().Format(time.RFC3339),
 	})
