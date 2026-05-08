@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"strings"
 
-	"emerald-moss-api/database"
+	"emerald-moss-api/pkg/database"
 )
 
 // CrisisInterceptor middleware for detecting crisis keywords

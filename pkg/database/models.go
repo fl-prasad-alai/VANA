@@ -171,6 +171,7 @@ type SupabaseConfig struct {
 	DBPassword     string
 	DBUser         string
 	DBName         string
+	ConnString     string
 }
 
 // AIProviderConfig holds API keys for AI providers

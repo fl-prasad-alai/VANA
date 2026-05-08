@@ -9,25 +9,15 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ============================================================================
--- MOCK AUTH SCHEMA (For Local Development)
+-- NOTE: The 'auth' schema is managed by Supabase. 
+-- We do not create it manually here to avoid permission errors.
 -- ============================================================================
-CREATE SCHEMA IF NOT EXISTS auth;
-CREATE TABLE IF NOT EXISTS auth.users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email TEXT UNIQUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
-);
-
--- Mock auth.uid() for local development
-CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid AS $$
-    SELECT id FROM auth.users LIMIT 1;
-$$ LANGUAGE sql STABLE;
 
 -- ============================================================================
--- TABLE: Users (Auth Integration)
+-- TABLE: Users (Independent Management)
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS public.users (
-    id UUID REFERENCES auth.users NOT NULL PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     email TEXT UNIQUE NOT NULL,
