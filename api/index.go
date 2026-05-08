@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"emerald-moss-api/internal/database"
-	"emerald-moss-api/internal/orchestration"
+	"emerald-moss-api/pkg/database"
+	"emerald-moss-api/pkg/orchestration"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
