@@ -19,14 +19,19 @@ type SupabaseClient struct {
 // NewSupabaseClient creates a new database connection
 func NewSupabaseClient(config SupabaseConfig) (*SupabaseClient, error) {
 	// PostgreSQL connection string
-	// For local development in Docker, URL should be the postgres service name
-	psqlInfo := fmt.Sprintf(
-		"host=%s port=5432 user=%s password=%s dbname=%s sslmode=disable",
-		config.URL,
-		config.DBUser,
-		config.DBPassword,
-		config.DBName,
-	)
+	var psqlInfo string
+	if config.ConnString != "" {
+		psqlInfo = config.ConnString
+	} else {
+		// For local development in Docker, URL should be the postgres service name
+		psqlInfo = fmt.Sprintf(
+			"host=%s port=5432 user=%s password=%s dbname=%s sslmode=disable",
+			config.URL,
+			config.DBUser,
+			config.DBPassword,
+			config.DBName,
+		)
+	}
 
 	db, err := sql.Open("postgres", psqlInfo)
 	if err != nil {
@@ -70,13 +75,7 @@ func (sc *SupabaseClient) CreateUser(ctx context.Context, user *User) error {
 	}
 	defer tx.Rollback()
 
-	// 1. Insert into auth.users (Mock Auth)
-	_, err = tx.ExecContext(ctx, "INSERT INTO auth.users (id, email) VALUES ($1, $2)", user.ID, user.Email)
-	if err != nil {
-		return fmt.Errorf("auth.users insert failed: %w", err)
-	}
-
-	// 2. Insert into public.users
+	// 1. Insert into public.users
 	_, err = tx.ExecContext(
 		ctx,
 		`INSERT INTO public.users (id, email, full_name, privacy_mode, consent_therapeutic, consent_data_collection, consent_research, is_active)

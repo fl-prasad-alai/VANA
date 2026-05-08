@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { User, Mail, Lock, ArrowRight, Leaf, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useTheme } from '../contexts/ThemeContext';
-import CinematicBackground from '../components/CinematicBackground';
+import LiquidForest from '../components/LiquidForest';
 import ThemeToggle from '../components/ThemeToggle';
 
 const FADE_UP = {
@@ -27,26 +27,23 @@ function Field({
   isGreening: boolean;
 }) {
   return (
-    <motion.div variants={FADE_UP}>
-      <label className="block text-xs font-medium dark:text-zinc-400 text-zinc-600 mb-1.5 uppercase tracking-wider">
+    <motion.div variants={FADE_UP} className="text-left">
+      <label className={`block text-[10px] font-bold tracking-[0.2em] uppercase ml-1 mb-2 ${isGreening ? 'text-emerald-300' : 'text-zinc-500 dark:text-zinc-400'}`}>
         {label}
       </label>
       <div className="relative">
-        <Icon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 dark:text-zinc-600 text-zinc-400 pointer-events-none" />
+        <Icon className={`absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 transition-colors ${isGreening ? 'text-emerald-400' : 'text-zinc-400'}`} />
         <input
           type={type}
           value={value}
           onChange={e => onChange(e.target.value)}
           autoComplete={autoComplete}
           className={`
-            w-full pl-9 pr-4 py-2.5 rounded-xl text-sm
-            dark:bg-white/[.04] bg-zinc-50
-            dark:text-zinc-100 text-zinc-900
-            dark:placeholder-zinc-600 placeholder-zinc-400
-            focus:outline-none focus:ring-2 transition-colors
-            ${error
-              ? 'border border-red-500/50 focus:ring-red-500/40'
-              : `dark:border dark:border-white/[.08] border border-black/[.08] ${isGreening ? 'focus:ring-emerald-500/50' : 'focus:ring-red-500/50'}`}
+            w-full py-3.5 pl-12 pr-4 rounded-2xl text-sm font-medium transition-all focus:outline-none 
+            ${isGreening 
+              ? 'bg-emerald-950/40 border border-emerald-500/30 text-white placeholder-emerald-500/50 focus:border-emerald-500/70 focus:bg-emerald-900/60 shadow-inner' 
+              : 'bg-white/60 dark:bg-black/40 border border-black/5 dark:border-white/10 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-600 focus:border-violet-500/50'}
+            ${error ? 'border-red-500/50 focus:border-red-500/50' : ''}
           `}
           placeholder={placeholder}
         />
@@ -119,8 +116,8 @@ export const SignupPage: React.FC = () => {
   };
 
   return (
-    <div className={`relative min-h-screen flex flex-col transition-colors duration-500 ${isGreening ? 'bg-[#022c22] text-[#ecfdf5]' : 'dark:bg-black bg-zinc-50'}`}>
-      <CinematicBackground />
+    <div className={`relative min-h-screen flex flex-col transition-colors duration-500 ${isGreening ? 'bg-transparent text-[#ecfdf5]' : 'bg-transparent dark:bg-transparent text-zinc-900 dark:text-zinc-100'}`}>
+      <LiquidForest />
 
       {/* Theme Toggle */}
       <div className="fixed bottom-8 left-1/2 -translate-x-1/2 sm:top-8 sm:right-8 sm:bottom-auto sm:left-auto sm:translate-x-0 z-50 scale-[0.85] sm:scale-100">
@@ -147,14 +144,19 @@ export const SignupPage: React.FC = () => {
           {/* Card */}
           <motion.div
             variants={FADE_UP}
-            className="relative overflow-hidden rounded-2xl dark:bg-white/[.03] bg-white dark:border dark:border-white/[.08] border border-black/[.06] dark:shadow-glass shadow-card-light p-8"
+            className={`
+              relative overflow-hidden rounded-[30px] p-8 sm:p-10 shadow-2xl transition-all duration-500
+              ${isGreening
+                ? 'bg-emerald-950/20 backdrop-blur-[80px] border border-emerald-500/20'
+                : 'bg-white/40 dark:bg-white/5 border border-black/5 dark:border-white/10 backdrop-blur-[60px]'}
+            `}
           >
-            <span className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
+            <div className={`absolute -top-24 -right-24 w-48 h-48 blur-[60px] rounded-full pointer-events-none ${isGreening ? 'bg-emerald-500/15' : 'bg-[#e11d48]/5'}`} />
 
-            <motion.h1 variants={FADE_UP} className="text-lg font-semibold dark:text-zinc-100 text-zinc-900 mb-1">
+            <motion.h1 variants={FADE_UP} className="text-2xl font-black tracking-tighter mb-1 font-heading">
               Create account
             </motion.h1>
-            <motion.p variants={FADE_UP} className="text-sm dark:text-zinc-500 text-zinc-500 mb-6">
+            <motion.p variants={FADE_UP} className={`text-sm mb-8 italic ${isGreening ? 'text-emerald-100/70' : 'dark:text-zinc-400 text-zinc-500'}`}>
               Begin your mental wellness journey with VANA
             </motion.p>
 
@@ -236,9 +238,9 @@ export const SignupPage: React.FC = () => {
             </form>
           </motion.div>
 
-          <motion.p variants={FADE_UP} className="text-center text-sm dark:text-zinc-600 text-zinc-500 mt-5">
+          <motion.p variants={FADE_UP} className={`text-center text-sm mt-6 ${isGreening ? 'text-emerald-100/70' : 'dark:text-zinc-400 text-zinc-500'}`}>
             Already have an account?{' '}
-            <Link to="/login" className={`font-bold hover:underline transition-colors ${isGreening ? 'text-emerald-500' : 'text-[#e11d48]'}`}>
+            <Link to="/login" className={`font-bold hover:underline transition-colors ${isGreening ? 'text-emerald-400 hover:text-emerald-300' : 'text-[#e11d48]'}`}>
               Sign in
             </Link>
           </motion.p>

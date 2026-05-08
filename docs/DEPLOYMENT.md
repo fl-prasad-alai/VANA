@@ -1,48 +1,55 @@
-# Project VANA - Deployment Guide
+# VANA Deployment Guide (Vercel + Supabase)
 
-## 🚀 Local Development (Docker)
+Follow these steps to deploy VANA to production.
 
-The fastest way to run VANA is using Docker Compose.
+## 1. Supabase Setup (Database)
 
-### Quick Start
-```bash
-# 1. Start all services
-docker compose up -d
+1.  **Create a Project**: Sign in to [Supabase](https://supabase.com) and create a new project.
+2.  **Database Schema**:
+    *   Open the **SQL Editor** in your Supabase dashboard.
+    *   Paste and run the contents of `docs/SUPABASE_SCHEMA.sql` (found in this repository).
+    *   This will set up the `users`, `conversations`, `messages`, and `clinical_knowledge` tables, along with the `pgvector` extension for RAG.
+3.  **Get Connection String**:
+    *   Go to **Project Settings > Database**.
+    *   Under **Connection String**, select **URI**.
+    *   Copy the string (it looks like `postgres://postgres.[project-id]:[password]@aws-0-us-east-1.pooler.supabase.com:5432/postgres`).
+    *   **Keep this safe!** You will need it for Vercel.
 
-# 2. Verify containers
-docker compose ps
+## 2. Vercel Setup (Frontend + API)
 
-# 3. Seed test data
-docker exec -i emerald-moss-postgres psql -U postgres -d emerald_moss < docs/SEED_DATA.sql
+1.  **Push to GitHub**: Ensure your latest changes are pushed to a GitHub repository.
+2.  **Import to Vercel**:
+    *   Sign in to [Vercel](https://vercel.com).
+    *   Click **Add New > Project** and import your VANA repository.
+3.  **Configure Project Settings**:
+    *   **Framework Preset**: Select `Vite` (Vercel should auto-detect this).
+    *   **Root Directory**: Leave as `./`.
+    *   **Build Command**: `npm run build`.
+    *   **Output Directory**: `dist`.
+4.  **Environment Variables**:
+    Add the following keys in **Project Settings > Environment Variables**:
+    *   `DATABASE_URL`: The Supabase URI you copied in Step 1.
+    *   `JWT_SECRET`: A long, random string (e.g., `openssl rand -base64 32`).
+    *   `GROQ_API_KEY`: Your Groq API key (from [console.groq.com](https://console.groq.com)).
+    *   `GEMINI_API_KEY`: Your Google Gemini API key (from [aistudio.google.com](https://aistudio.google.com)).
+    *   `VITE_API_URL`: `/api` (Vercel will route this correctly via `vercel.json`).
 
-# 4. Access
-- Frontend: http://localhost:5173
-- Backend: http://localhost:3000
-- pgAdmin: http://localhost:5050 (admin@emerald-moss.local / admin)
-```
+## 3. Post-Deployment: Clinical Knowledge (RAG)
 
-## 🛠️ Production Deployment (Vercel + Supabase)
+To enable the AI to use clinical context, you need to seed the `clinical_knowledge` table in Supabase.
 
-### Backend (Vercel Go Functions)
-1. Set up a Vercel project.
-2. Add environment variables:
-   - `JWT_SECRET`
-   - `DATABASE_URL`
-   - `GROQ_API_KEY`
-   - `GEMINI_API_KEY`
-3. Vercel will automatically detect the `/api/*.go` handlers.
-
-### Database (Supabase / Managed Postgres)
-1. Provision a PostgreSQL instance with the `pgvector` extension.
-2. Run the schema from `docs/SUPABASE_SCHEMA.sql`.
-3. Set up the connection string in your backend environment variables.
-
-### Frontend (Vercel React)
-1. Link your repository.
-2. Set build command: `npm run build`.
-3. Set output directory: `dist`.
-4. Set environment variable: `VITE_API_URL`.
+1.  Use the Supabase SQL Editor to run `docs/SEED_DATA.sql`.
+2.  Alternatively, use a tool like `psql` to run the seed file against your Supabase URI:
+    ```bash
+    psql "[YOUR_SUPABASE_URI]" -f docs/SEED_DATA.sql
+    ```
 
 ---
-**Last Updated**: April 28, 2026
-**Status**: Production Ready
+
+## 🛠️ Maintenance & Monitoring
+
+*   **Logs**: View real-time API logs in the Vercel **Logs** tab. Look for `api/index.go` execution.
+*   **Database**: Use the Supabase **Table Editor** to view users and conversation history.
+*   **Scaling**: Vercel handles the API scaling automatically. Supabase can be scaled in the project settings if traffic increases.
+
+**Status**: 🚀 Production Ready | **Last Updated**: May 8, 2026

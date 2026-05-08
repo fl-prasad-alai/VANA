@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useTheme } from '../contexts/ThemeContext';
-import CinematicBackground from '../components/CinematicBackground';
+import LiquidForest from '../components/LiquidForest';
 import ThemeToggle from '../components/ThemeToggle';
 
 const FeatureCard = ({
@@ -107,8 +107,8 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className={`relative min-h-screen overflow-x-hidden font-sans transition-colors duration-500 ${isGreening ? 'bg-[#022c22] text-[#ecfdf5]' : 'bg-slate-50 dark:bg-black text-zinc-900 dark:text-zinc-100'}`}>
-      <CinematicBackground />
+    <div className={`relative min-h-screen overflow-x-hidden font-sans transition-colors duration-500 ${isGreening ? 'bg-transparent text-[#ecfdf5]' : 'bg-transparent dark:bg-transparent text-zinc-900 dark:text-zinc-100'}`}>
+      <LiquidForest />
 
       {/* Theme Toggle — mobile bottom-center, desktop top-right */}
       <div className="fixed bottom-8 left-1/2 -translate-x-1/2 sm:top-8 sm:right-8 sm:bottom-auto sm:left-auto sm:translate-x-0 z-50 scale-[0.85] sm:scale-100">
@@ -294,7 +294,7 @@ export const LoginPage: React.FC = () => {
                 />
               </motion.div>
 
-              <div className="pt-12 text-zinc-500 text-[10px] font-bold tracking-[0.3em] uppercase opacity-40">
+              <div className="pt-12 text-white-500 text-[10px] font-bold tracking-[0.3em] uppercase opacity-40">
                 Authorized Personnel Only | VANA v1.0 — Project Emerald Moss
               </div>
             </motion.div>
