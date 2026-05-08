@@ -133,10 +133,17 @@ const LiquidForest: React.FC = () => {
         finalColor = mix(finalColor, uColorMid, ambient * 0.5 + 0.5);
         finalColor = mix(finalColor, uColorHighlight, caustics * 0.8);
 
-        // Vignette effect to darken edges
+        // Vignette effect
         float vignette = length(p);
-        vignette = smoothstep(1.5, 0.5, vignette);
-        finalColor *= vignette;
+        vignette = smoothstep(1.6, 0.4, vignette);
+        
+        // In light mode, we don't want dark edges, we want a soft fade to white/base
+        // In dark/greening, we want dark edges
+        if (uColorBase.r > 0.5) {
+          finalColor = mix(uColorBase, finalColor, vignette);
+        } else {
+          finalColor *= vignette;
+        }
 
         gl_FragColor = vec4(finalColor, 1.0);
       }
@@ -150,9 +157,9 @@ const LiquidForest: React.FC = () => {
       uniforms: {
         uTime: { value: 0 },
         uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-        uColorBase: { value: initialColors.base },
-        uColorMid: { value: initialColors.mid },
-        uColorHighlight: { value: initialColors.highlight }
+        uColorBase: { value: initialColors.base.clone() },
+        uColorMid: { value: initialColors.mid.clone() },
+        uColorHighlight: { value: initialColors.highlight.clone() }
       },
       transparent: true,
       depthWrite: false,

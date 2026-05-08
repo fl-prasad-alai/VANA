@@ -294,7 +294,7 @@ export const LoginPage: React.FC = () => {
                 />
               </motion.div>
 
-              <div className="pt-12 text-zinc-500 text-[10px] font-bold tracking-[0.3em] uppercase opacity-40">
+              <div className="pt-12 text-white-500 text-[10px] font-bold tracking-[0.3em] uppercase opacity-40">
                 Authorized Personnel Only | VANA v1.0 — Project Emerald Moss
               </div>
             </motion.div>
