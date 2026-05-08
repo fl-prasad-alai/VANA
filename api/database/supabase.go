@@ -19,14 +19,19 @@ type SupabaseClient struct {
 // NewSupabaseClient creates a new database connection
 func NewSupabaseClient(config SupabaseConfig) (*SupabaseClient, error) {
 	// PostgreSQL connection string
-	// For local development in Docker, URL should be the postgres service name
-	psqlInfo := fmt.Sprintf(
-		"host=%s port=5432 user=%s password=%s dbname=%s sslmode=disable",
-		config.URL,
-		config.DBUser,
-		config.DBPassword,
-		config.DBName,
-	)
+	var psqlInfo string
+	if config.ConnString != "" {
+		psqlInfo = config.ConnString
+	} else {
+		// For local development in Docker, URL should be the postgres service name
+		psqlInfo = fmt.Sprintf(
+			"host=%s port=5432 user=%s password=%s dbname=%s sslmode=disable",
+			config.URL,
+			config.DBUser,
+			config.DBPassword,
+			config.DBName,
+		)
+	}
 
 	db, err := sql.Open("postgres", psqlInfo)
 	if err != nil {

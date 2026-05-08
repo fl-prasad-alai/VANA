@@ -1,4 +1,4 @@
-package main
+package handler
 
 import (
 	"encoding/json"
@@ -6,56 +6,57 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"emerald-moss-api/database"
 	"emerald-moss-api/orchestration"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/joho/godotenv"
 )
 
 var (
 	dbClient   *database.SupabaseClient
 	aiBalancer *orchestration.MultiProviderBalancer
-	jwtSecret  = []byte("your-super-secret-key-change-in-production")
+	jwtSecret  []byte
+	once       sync.Once
 )
 
-func main() {
-	_ = godotenv.Load()
-
-	if secret := os.Getenv("JWT_SECRET"); secret != "" {
+func initApp() {
+	once.Do(func() {
+		secret := os.Getenv("JWT_SECRET")
+		if secret == "" {
+			secret = "your-super-secret-key-change-in-production"
+		}
 		jwtSecret = []byte(secret)
-	}
 
-	config := database.SupabaseConfig{
-		URL:        os.Getenv("SUPABASE_URL"),
-		DBUser:     os.Getenv("SUPABASE_DB_USER"),
-		DBPassword: os.Getenv("SUPABASE_DB_PASSWORD"),
-		DBName:     os.Getenv("SUPABASE_DB_NAME"),
-		ConnString: os.Getenv("DATABASE_URL"),
-	}
+		config := database.SupabaseConfig{
+			URL:        os.Getenv("SUPABASE_URL"),
+			DBUser:     os.Getenv("SUPABASE_DB_USER"),
+			DBPassword: os.Getenv("SUPABASE_DB_PASSWORD"),
+			DBName:     os.Getenv("SUPABASE_DB_NAME"),
+			ConnString: os.Getenv("DATABASE_URL"),
+		}
 
-	// Default for docker-compose
-	if config.URL == "" { config.URL = "postgres" }
-	if config.DBUser == "" { config.DBUser = "postgres" }
-	if config.DBPassword == "" { config.DBPassword = "postgres" }
-	if config.DBName == "" { config.DBName = "emerald_moss" }
+		client, err := database.NewSupabaseClient(config)
+		if err != nil {
+			log.Printf("Warning: Database connection failed: %v", err)
+		}
+		dbClient = client
 
-	client, err := database.NewSupabaseClient(config)
-	if err != nil {
-		log.Printf("Warning: Database connection failed: %v", err)
-	}
-	dbClient = client
+		// Initialize AI Balancer
+		groqKey := os.Getenv("GROQ_API_KEY")
+		geminiKey := os.Getenv("GEMINI_API_KEY")
 
-	// Initialize AI Balancer
-	groqKey := os.Getenv("GROQ_API_KEY")
-	geminiKey := os.Getenv("GEMINI_API_KEY")
+		groq := orchestration.NewGroqClient(groqKey, "llama-3.1-8b-instant")
+		gemini := orchestration.NewGeminiClient(geminiKey, "gemini-1.5-flash")
+		
+		aiBalancer = orchestration.NewMultiProviderBalancer(groq, gemini, 30, 15)
+	})
+}
 
-	groq := orchestration.NewGroqClient(groqKey, "llama-3.1-8b-instant")
-	gemini := orchestration.NewGeminiClient(geminiKey, "gemini-1.5-flash")
-	
-	aiBalancer = orchestration.NewMultiProviderBalancer(groq, gemini, 30, 15)
+func Handler(w http.ResponseWriter, r *http.Request) {
+	initApp()
 
 	mux := http.NewServeMux()
 
@@ -67,12 +68,7 @@ func main() {
 
 	// CORS Middleware
 	handler := corsMiddleware(mux)
-
-	port := os.Getenv("PORT")
-	if port == "" { port = "3000" }
-
-	fmt.Printf("VANA Backend running on port %s...\n", port)
-	log.Fatal(http.ListenAndServe(":"+port, handler))
+	handler.ServeHTTP(w, r)
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
@@ -108,7 +104,6 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if dbClient == nil {
-		// Mock success if DB is not available
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": true,
@@ -123,11 +118,8 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-
-	// Check if user already exists
 	existingUser, err := dbClient.GetUserByEmail(ctx, req.Email)
 	if err == nil && existingUser != nil {
-		log.Printf("Registration Error: User already exists: %s", req.Email)
 		http.Error(w, "User already exists with this email", http.StatusBadRequest)
 		return
 	}
@@ -140,8 +132,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := dbClient.CreateUser(ctx, user); err != nil {
-		log.Printf("DB Error during registration for %s: %v", req.Email, err)
-		http.Error(w, "Registration failed. Please try again later.", http.StatusInternalServerError)
+		http.Error(w, "Registration failed", http.StatusInternalServerError)
 		return
 	}
 
@@ -167,7 +158,6 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if dbClient == nil {
-		// Mock success for admin
 		if req.Email == "admin@vana.com" {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
@@ -186,18 +176,10 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	user, err := dbClient.GetUserByEmail(ctx, req.Email)
-	if err != nil {
-		log.Printf("Login Error: GetUserByEmail failed for %s: %v", req.Email, err)
+	if err != nil || user == nil {
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
 	}
-	if user == nil {
-		log.Printf("Login Error: User not found: %s", req.Email)
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
-		return
-	}
-
-	log.Printf("Login Success: UserID=%s", user.ID)
 
 	token := generateToken(user.ID)
 
@@ -219,13 +201,9 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	
-	// Use AI Balancer (Groq/Gemini Orchestration)
 	response, provider, _, err := aiBalancer.HandleChat(ctx, req.Message, nil, false)
 	if err != nil {
-		log.Printf("AI Error: %v", err)
-		// Fallback to simple message if AI fails
-		response = "I'm here to support you. That sounds like something we should explore. How does that make you feel?"
+		response = "I'm here to support you. How does that make you feel?"
 		provider = "mock"
 	}
 	
