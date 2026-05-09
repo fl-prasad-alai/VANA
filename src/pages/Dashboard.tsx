@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Leaf, Send, Mic, MicOff, Plus, LogOut, Settings, BarChart3, ChevronRight, X,
@@ -112,18 +113,50 @@ export const DashboardPage: React.FC = () => {
     setLoading(true);
     inputRef.current?.focus();
 
-    await new Promise(r => setTimeout(r, 1200 + Math.random() * 600));
+    try {
+      const response = await axios.post('/chat', {
+        message: text,
+        conversationId: activeSession,
+        userId: user?.id,
+      });
 
-    const responses = [
-      { text: "That sounds really meaningful. Could you tell me more about what triggered that feeling?", sentiment: 'positive' as const },
-      { text: "I hear you, and I want you to know that what you're experiencing is valid. Let's explore this together.", sentiment: 'neutral' as const },
-      { text: "Thank you for sharing that with me. It takes courage to open up. How long have you been feeling this way?", sentiment: 'neutral' as const },
-      { text: "I'm here with you through this. What does your body feel like right now as you think about this?", sentiment: 'positive' as const },
-    ];
-    const chosen = responses[Math.floor(Math.random() * responses.length)];
-    const botMsg: Message = { id: (Date.now() + 1).toString(), sender: 'bot', text: chosen.text, timestamp: new Date(), sentiment: chosen.sentiment };
-    setMessages(prev => [...prev, botMsg]);
-    setLoading(false);
+      let sentiment: 'neutral' | 'positive' | 'negative' | 'critical' = 'neutral';
+      if (response.data.crisis) {
+        sentiment = 'critical';
+      } else if (response.data.sentiment_score > 0.6) {
+        sentiment = 'positive';
+      } else if (response.data.sentiment_score < 0.4) {
+        sentiment = 'negative';
+      }
+
+      const botMsg: Message = { 
+        id: (Date.now() + 1).toString(), 
+        sender: 'bot', 
+        text: response.data.text, 
+        timestamp: new Date(), 
+        sentiment: sentiment 
+      };
+      
+      setMessages(prev => [...prev, botMsg]);
+    } catch (error: any) {
+      console.error('Chat error:', error);
+      
+      const isRateLimit = error.response?.status === 429;
+      const errorText = isRateLimit 
+        ? "I'm receiving too many messages right now. Please take a deep breath and wait a moment before sharing more."
+        : "I'm having trouble connecting right now. Please try again in a moment.";
+
+      const botMsg: Message = { 
+        id: (Date.now() + 1).toString(), 
+        sender: 'bot', 
+        text: errorText, 
+        timestamp: new Date(), 
+        sentiment: 'critical' 
+      };
+      setMessages(prev => [...prev, botMsg]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

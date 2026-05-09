@@ -146,6 +146,64 @@ func (gc *GeminiClient) GetProvider() string {
 	return "gemini"
 }
 
+// geminiEmbeddingRequest represents a Gemini embedding request
+type geminiEmbeddingRequest struct {
+	Content struct {
+		Parts []struct {
+			Text string `json:"text"`
+		} `json:"parts"`
+	} `json:"content"`
+}
+
+// geminiEmbeddingResponse represents Gemini's embedding API response
+type geminiEmbeddingResponse struct {
+	Embedding struct {
+		Values []float64 `json:"values"`
+	} `json:"embedding"`
+}
+
+// GenerateEmbedding calls Gemini API to generate text embeddings
+func (gc *GeminiClient) GenerateEmbedding(ctx context.Context, text string) ([]float64, error) {
+	payload := geminiEmbeddingRequest{}
+	payload.Content.Parts = append(payload.Content.Parts, struct {
+		Text string `json:"text"`
+	}{Text: text})
+
+	jsonPayload, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal embedding request: %w", err)
+	}
+
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=%s", gc.apiKey)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonPayload))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create embedding request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := gc.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("embedding request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("gemini embedding api error: %s (status: %d)", string(body), resp.StatusCode)
+	}
+
+	var geminiResp geminiEmbeddingResponse
+	if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil {
+		return nil, fmt.Errorf("failed to parse embedding response: %w", err)
+	}
+
+	if len(geminiResp.Embedding.Values) == 0 {
+		return nil, fmt.Errorf("no embedding values in response")
+	}
+
+	return geminiResp.Embedding.Values, nil
+}
+
 // buildGeminiContents constructs content for Gemini API
 func buildGeminiContents(prompt string, conversationHistory []string) []geminiContent {
 	contents := []geminiContent{}
