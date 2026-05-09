@@ -55,7 +55,7 @@ func (b *MultiProviderBalancer) HandleChat(
 	}
 
 	// Try Groq first (Tier 1: Speed)
-	ctxSpeed, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
+	ctxSpeed, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	response, tokens, err := b.groqProvider.GenerateResponse(ctxSpeed, message, conversationHistory)
