@@ -6,6 +6,8 @@ import { LoginPage } from './pages/Login';
 import { SignupPage } from './pages/Signup';
 import { DashboardPage } from './pages/Dashboard';
 
+import { Analytics } from '@vercel/analytics/react';
+
 function App() {
   return (
     <ThemeProvider>
@@ -19,6 +21,7 @@ function App() {
             <Route path="*"          element={<Navigate to="/login" replace />} />
           </Routes>
         </Router>
+        <Analytics />
       </AuthProvider>
     </ThemeProvider>
   );
