@@ -250,6 +250,40 @@ func (sc *SupabaseClient) LogAPIUsage(ctx context.Context, userID, endpoint stri
 	return err
 }
 
+// CheckRateLimit checks if a user has exceeded their message limits
+func (sc *SupabaseClient) CheckRateLimit(ctx context.Context, userID string) error {
+	var minuteCount, hourCount, dayCount int
+
+	// Minute limit: 2
+	err := sc.db.QueryRowContext(ctx, `SELECT count(*) FROM public.messages WHERE user_id = $1 AND sender = 'user' AND created_at >= NOW() - INTERVAL '1 minute'`, userID).Scan(&minuteCount)
+	if err != nil {
+		return fmt.Errorf("rate limit check error: %w", err)
+	}
+	if minuteCount >= 2 {
+		return fmt.Errorf("rate limit exceeded: max 2 messages per minute")
+	}
+
+	// Hour limit: 20
+	err = sc.db.QueryRowContext(ctx, `SELECT count(*) FROM public.messages WHERE user_id = $1 AND sender = 'user' AND created_at >= NOW() - INTERVAL '1 hour'`, userID).Scan(&hourCount)
+	if err != nil {
+		return fmt.Errorf("rate limit check error: %w", err)
+	}
+	if hourCount >= 20 {
+		return fmt.Errorf("rate limit exceeded: max 20 messages per hour")
+	}
+
+	// Day limit: 50
+	err = sc.db.QueryRowContext(ctx, `SELECT count(*) FROM public.messages WHERE user_id = $1 AND sender = 'user' AND created_at >= CURRENT_DATE`, userID).Scan(&dayCount)
+	if err != nil {
+		return fmt.Errorf("rate limit check error: %w", err)
+	}
+	if dayCount >= 50 {
+		return fmt.Errorf("rate limit exceeded: max 50 messages per day")
+	}
+
+	return nil
+}
+
 // Close closes the database connection
 func (sc *SupabaseClient) Close() error {
 	return sc.db.Close()

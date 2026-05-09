@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,10 +16,10 @@ import (
 )
 
 var (
-	dbClient   *database.SupabaseClient
-	aiBalancer *orchestration.MultiProviderBalancer
-	jwtSecret  []byte
-	once       sync.Once
+	dbClient      *database.SupabaseClient
+	aiOrchestrator *orchestration.Orchestrator
+	jwtSecret     []byte
+	once          sync.Once
 )
 
 func initApp() {
@@ -43,14 +44,25 @@ func initApp() {
 		}
 		dbClient = client
 
-		// Initialize AI Balancer
+		// Initialize AI Balancer & Orchestrator
 		groqKey := os.Getenv("GROQ_API_KEY")
 		geminiKey := os.Getenv("GEMINI_API_KEY")
+		groqModel := os.Getenv("GROQ_MODEL")
+		if groqModel == "" {
+			groqModel = "llama-3.1-8b-instant"
+		}
+		geminiModel := os.Getenv("GEMINI_MODEL")
+		if geminiModel == "" {
+			geminiModel = "gemini-2.0-flash"
+		}
 
-		groq := orchestration.NewGroqClient(groqKey, "llama-3.1-8b-instant")
-		gemini := orchestration.NewGeminiClient(geminiKey, "gemini-1.5-flash")
-		
-		aiBalancer = orchestration.NewMultiProviderBalancer(groq, gemini, 30, 15)
+		log.Printf("[VANA] GROQ key: %s... len=%d model=%s", safePrefix(groqKey), len(groqKey), groqModel)
+		log.Printf("[VANA] GEMINI key: %s... len=%d model=%s", safePrefix(geminiKey), len(geminiKey), geminiModel)
+
+		groq := orchestration.NewGroqClient(groqKey, groqModel)
+		gemini := orchestration.NewGeminiClient(geminiKey, geminiModel)
+		balancer := orchestration.NewMultiProviderBalancer(groq, gemini, 30, 15)
+		aiOrchestrator = orchestration.NewOrchestrator(balancer, dbClient, gemini)
 	})
 }
 
@@ -192,28 +204,56 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 
 func handleChat(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Message string `json:"message"`
+		Message        string `json:"message"`
+		ConversationID string `json:"conversationId"`
+		UserID         string `json:"userId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
 	}
 
-	ctx := r.Context()
-	response, provider, _, err := aiBalancer.HandleChat(ctx, req.Message, nil, false)
-	if err != nil {
-		response = "I'm here to support you. How does that make you feel?"
-		provider = "mock"
+	// Normalize IDs — non-UUID values from the frontend (e.g. "1") would cause DB errors
+	if req.UserID == "" {
+		req.UserID = "00000000-0000-0000-0000-000000000000"
+	} else if _, err := uuid.Parse(req.UserID); err != nil {
+		req.UserID = "00000000-0000-0000-0000-000000000000"
 	}
-	
+	if req.ConversationID == "" {
+		req.ConversationID = "00000000-0000-0000-0000-000000000000"
+	} else if _, err := uuid.Parse(req.ConversationID); err != nil {
+		req.ConversationID = "00000000-0000-0000-0000-000000000000"
+	}
+
+	ctx := r.Context()
+
+	if dbClient != nil {
+		if err := dbClient.CheckRateLimit(ctx, req.UserID); err != nil {
+			if strings.Contains(err.Error(), "exceeded") {
+				log.Printf("Rate limit exceeded for user %s: %v", req.UserID, err)
+				http.Error(w, err.Error(), http.StatusTooManyRequests)
+				return
+			}
+			log.Printf("Rate limit check warning: %v", err)
+		}
+	}
+
+	result, err := aiOrchestrator.GenerateResponse(ctx, req.UserID, req.ConversationID, req.Message)
+	if err != nil {
+		log.Printf("Orchestration error: %v", err)
+		http.Error(w, "Failed to generate response", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"id":        uuid.New().String(),
-		"response":  response,
-		"provider":  provider,
-		"sentiment": 0.5,
-		"timestamp": time.Now().Format(time.RFC3339),
-	})
+	json.NewEncoder(w).Encode(result)
+}
+
+func safePrefix(s string) string {
+	if len(s) < 8 {
+		return "EMPTY"
+	}
+	return s[:8]
 }
 
 func generateToken(userID string) string {
