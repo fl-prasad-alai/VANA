@@ -7,10 +7,10 @@ WORKDIR /app
 # Install git for downloading dependencies
 RUN apk add --no-cache git
 
-# Copy source code (including go.mod)
-COPY api/ .
+# Copy source code
+COPY . .
 
-# Download and tidy dependencies (needs source code to see imports)
+# Download and tidy dependencies
 RUN go mod tidy
 
 # Build the application
