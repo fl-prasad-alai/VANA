@@ -91,70 +91,77 @@ const MemoizedMarkdown = React.memo(({ content }: { content: string }) => (
 
 const VoiceInput = ({ onSend, loading, accentBg }: { onSend: (text: string, isVoice: boolean) => void, loading: boolean, accentBg: string }) => {
   const { transcript, listening, resetTranscript, browserSupportsSpeechRecognition } = useSpeechRecognition();
+  // Local state tracks intent immediately — doesn't wait for library async update
+  const [isActive, setIsActive] = useState(false);
   const silenceTimerRef = useRef<any>(null);
+  const transcriptRef = useRef(transcript);
 
-  const handleStop = useCallback(() => {
-    console.log('VANA-VOICE: Executing manual abort...');
+  // Keep ref in sync so callbacks always see the latest transcript without stale closures
+  useEffect(() => { transcriptRef.current = transcript; }, [transcript]);
+
+  const stopMic = useCallback((sendText: boolean) => {
+    setIsActive(false);
+    SpeechRecognition.stopListening();
     SpeechRecognition.abortListening();
-    
-    if (transcript.trim()) {
-      onSend(transcript, true);
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
     }
-    
+    if (sendText && transcriptRef.current.trim()) {
+      onSend(transcriptRef.current, true);
+    }
     resetTranscript();
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-  }, [transcript, onSend, resetTranscript]);
+  }, [onSend, resetTranscript]);
 
-  const startListening = () => {
-    resetTranscript();
-    console.log('VANA-VOICE: Attempting to start listening...');
-    
-    try {
-      SpeechRecognition.startListening({ 
-        continuous: true, 
-        language: 'en-IN' 
-      }).catch(err => {
-        console.warn('VANA-VOICE: en-IN failed, falling back to default', err);
-        SpeechRecognition.startListening({ continuous: false });
-      });
-    } catch (e) {
-      console.error('VANA-VOICE: Critical failure in startListening', e);
-    }
-  };
-
-  const toggleListening = () => {
-    if (listening) {
-      console.log('VANA-VOICE: Stopping...');
-      handleStop();
-    } else {
-      startListening();
-    }
-  };
-
+  // If the library independently stops (e.g. browser cuts it off), sync local state
   useEffect(() => {
-    if (listening) {
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = setTimeout(() => {
-        handleStop();
-      }, 10000);
+    if (!listening && isActive) {
+      setIsActive(false);
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
     }
+  }, [listening, isActive]);
+
+  // Stop mic as soon as the message is sent (loading goes true)
+  useEffect(() => {
+    if (loading && isActive) {
+      setIsActive(false);
+      SpeechRecognition.stopListening();
+      SpeechRecognition.abortListening();
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
+    }
+  }, [loading, isActive]);
+
+  // 10-second silence timer — resets on each new transcript chunk
+  useEffect(() => {
+    if (!isActive) return;
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    silenceTimerRef.current = setTimeout(() => stopMic(true), 10000);
     return () => {
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     };
-  }, [transcript, listening, handleStop]);
+  }, [transcript, isActive, stopMic]);
 
-  // Status reporter for production debugging
-  const getStatusText = () => {
-    if (listening) return 'Listening...';
-    if (!browserSupportsSpeechRecognition) return 'Not Supported';
-    return 'Ready';
+  const toggleListening = () => {
+    if (isActive || listening) {
+      stopMic(true);
+    } else {
+      resetTranscript();
+      setIsActive(true);
+      SpeechRecognition.startListening({ continuous: true, language: 'en-IN' })
+        .catch(() => SpeechRecognition.startListening({ continuous: false }));
+    }
   };
 
   if (!browserSupportsSpeechRecognition) {
-    console.warn('VANA-VOICE: Browser does not support speech recognition');
     return (
-      <button 
-        disabled 
+      <button
+        disabled
         title="Speech recognition not supported in this browser"
         className="flex-shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center bg-black/5 text-zinc-400 opacity-50 cursor-not-allowed"
       >
@@ -163,38 +170,31 @@ const VoiceInput = ({ onSend, loading, accentBg }: { onSend: (text: string, isVo
     );
   }
 
-  // Production Check: Ensure we are in a secure context (HTTPS)
-  if (!window.isSecureContext) {
-    console.error('VANA-VOICE: Microphone access requires HTTPS on production domains.');
-  }
+  const showAsListening = isActive || listening;
 
   return (
     <motion.button
       whileHover={{ scale: 1.05 }}
       whileTap={{ scale: 0.95 }}
-      onClick={(e) => {
-        e.preventDefault();
-        console.log('VANA-VOICE: Toggle interaction detected');
-        toggleListening();
-      }}
+      onClick={(e) => { e.preventDefault(); toggleListening(); }}
       disabled={loading}
       className={`
         flex-shrink-0 px-4 h-11 rounded-2xl flex items-center justify-center transition-all font-bold text-xs tracking-wider uppercase
-        ${listening
+        ${showAsListening
           ? `${accentBg} text-white shadow-lg animate-pulse`
           : 'dark:bg-white/5 bg-black/5 text-zinc-400 hover:text-zinc-200'}
       `}
-      title={listening ? "Click to stop" : "Click to speak"}
+      title={showAsListening ? "Click to stop" : "Click to speak"}
     >
       <div className="relative">
-        {listening ? (
+        {showAsListening ? (
           <span className="flex items-center gap-2">
-            <Mic className="w-4 h-4 animate-bounce text-white"/> 
+            <Mic className="w-4 h-4 animate-bounce text-white"/>
             <span className="hidden md:inline text-[10px] font-bold tracking-tight">🌳  Listening...</span>
           </span>
         ) : (
           <span className="flex items-center gap-2">
-            <Mic className="w-4 h-4"/> 
+            <Mic className="w-4 h-4"/>
             <span className="hidden md:inline text-[10px] tracking-tight">Speak to VANA</span>
           </span>
         )}
