@@ -11,6 +11,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import CinematicBackground from '../components/CinematicBackground';
 import ThemeToggle from '../components/ThemeToggle';
 import VitalityCore from '../components/VitalityCore';
+import ReactMarkdown from 'react-markdown';
 
 interface Message {
   id: string;
@@ -380,7 +381,19 @@ export const DashboardPage: React.FC = () => {
                       {msg.sender === 'bot' && (
                         <span className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent rounded-t-3xl" />
                       )}
-                      <p className="text-sm leading-relaxed">{msg.text}</p>
+                      <div className="text-sm leading-relaxed space-y-3 break-words">
+                        <ReactMarkdown
+                          components={{
+                            h2: ({node, ...props}) => <h2 className="text-lg font-bold mt-2 mb-1" {...props} />,
+                            ul: ({node, ...props}) => <ul className="list-disc pl-5 space-y-2" {...props} />,
+                            p: ({node, ...props}) => <p className="leading-relaxed" {...props} />,
+                            hr: ({node, ...props}) => <hr className="my-4 border-current opacity-20" {...props} />,
+                            strong: ({node, ...props}) => <strong className="font-bold text-current opacity-90" {...props} />
+                          }}
+                        >
+                          {msg.text}
+                        </ReactMarkdown>
+                      </div>
                     </div>
                     <p className={`text-[10px] mt-1.5 font-mono opacity-40 ${msg.sender === 'user' ? 'text-right' : 'text-left'}`}>
                       {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
