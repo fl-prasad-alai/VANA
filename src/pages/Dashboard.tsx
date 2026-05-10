@@ -90,66 +90,59 @@ const MemoizedMarkdown = React.memo(({ content }: { content: string }) => (
 ));
 
 const VoiceInput = ({ onSend, loading, accentBg }: { onSend: (text: string, isVoice: boolean) => void, loading: boolean, accentBg: string }) => {
-  const { transcript, listening, resetTranscript, browserSupportsSpeechRecognition } = useSpeechRecognition();
-  // Local state tracks intent immediately — doesn't wait for library async update
+  const { transcript, resetTranscript, browserSupportsSpeechRecognition } = useSpeechRecognition();
+  // isActive is the SOLE source of truth for the UI — never use `listening` directly.
+  // `listening` from react-speech-recognition has async lag on production and stays `true`
+  // long after abort/stop is called, causing the UI to get stuck.
   const [isActive, setIsActive] = useState(false);
   const silenceTimerRef = useRef<any>(null);
-  const transcriptRef = useRef(transcript);
+  const transcriptRef = useRef('');
 
-  // Keep ref in sync so callbacks always see the latest transcript without stale closures
   useEffect(() => { transcriptRef.current = transcript; }, [transcript]);
 
-  const stopMic = useCallback((sendText: boolean) => {
-    setIsActive(false);
-    SpeechRecognition.stopListening();
-    SpeechRecognition.abortListening();
+  const clearTimer = () => {
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;
     }
+  };
+
+  // Single exit point — everything that stops the mic goes through here
+  const forceStop = useCallback((sendText: boolean) => {
+    setIsActive(false);
+    clearTimer();
+    SpeechRecognition.stopListening();
+    SpeechRecognition.abortListening();
     if (sendText && transcriptRef.current.trim()) {
       onSend(transcriptRef.current, true);
     }
     resetTranscript();
   }, [onSend, resetTranscript]);
 
-  // If the library independently stops (e.g. browser cuts it off), sync local state
+  // Belt-and-suspenders: whenever isActive flips to false, always release the mic
   useEffect(() => {
-    if (!listening && isActive) {
-      setIsActive(false);
-      if (silenceTimerRef.current) {
-        clearTimeout(silenceTimerRef.current);
-        silenceTimerRef.current = null;
-      }
-    }
-  }, [listening, isActive]);
-
-  // Stop mic as soon as the message is sent (loading goes true)
-  useEffect(() => {
-    if (loading && isActive) {
-      setIsActive(false);
+    if (!isActive) {
       SpeechRecognition.stopListening();
       SpeechRecognition.abortListening();
-      if (silenceTimerRef.current) {
-        clearTimeout(silenceTimerRef.current);
-        silenceTimerRef.current = null;
-      }
     }
-  }, [loading, isActive]);
+  }, [isActive]);
+
+  // Stop when message starts processing (loading = true)
+  useEffect(() => {
+    if (loading && isActive) forceStop(false);
+  }, [loading, isActive, forceStop]);
 
   // 10-second silence timer — resets on each new transcript chunk
   useEffect(() => {
     if (!isActive) return;
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-    silenceTimerRef.current = setTimeout(() => stopMic(true), 10000);
-    return () => {
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-    };
-  }, [transcript, isActive, stopMic]);
+    clearTimer();
+    silenceTimerRef.current = setTimeout(() => forceStop(true), 10000);
+    return clearTimer;
+  }, [transcript, isActive, forceStop]);
 
   const toggleListening = () => {
-    if (isActive || listening) {
-      stopMic(true);
+    if (isActive) {
+      forceStop(true);
     } else {
       resetTranscript();
       setIsActive(true);
@@ -170,8 +163,6 @@ const VoiceInput = ({ onSend, loading, accentBg }: { onSend: (text: string, isVo
     );
   }
 
-  const showAsListening = isActive || listening;
-
   return (
     <motion.button
       whileHover={{ scale: 1.05 }}
@@ -180,14 +171,14 @@ const VoiceInput = ({ onSend, loading, accentBg }: { onSend: (text: string, isVo
       disabled={loading}
       className={`
         flex-shrink-0 px-4 h-11 rounded-2xl flex items-center justify-center transition-all font-bold text-xs tracking-wider uppercase
-        ${showAsListening
+        ${isActive
           ? `${accentBg} text-white shadow-lg animate-pulse`
           : 'dark:bg-white/5 bg-black/5 text-zinc-400 hover:text-zinc-200'}
       `}
-      title={showAsListening ? "Click to stop" : "Click to speak"}
+      title={isActive ? "Click to stop" : "Click to speak"}
     >
       <div className="relative">
-        {showAsListening ? (
+        {isActive ? (
           <span className="flex items-center gap-2">
             <Mic className="w-4 h-4 animate-bounce text-white"/>
             <span className="hidden md:inline text-[10px] font-bold tracking-tight">🌳  Listening...</span>
