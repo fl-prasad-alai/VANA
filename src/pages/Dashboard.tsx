@@ -94,10 +94,13 @@ const VoiceInput = ({ onSend, loading, accentBg }: { onSend: (text: string, isVo
   const silenceTimerRef = useRef<any>(null);
 
   const handleStop = useCallback(() => {
-    SpeechRecognition.stopListening();
+    console.log('VANA-VOICE: Executing manual abort...');
+    SpeechRecognition.abortListening();
+    
     if (transcript.trim()) {
       onSend(transcript, true);
     }
+    
     resetTranscript();
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
   }, [transcript, onSend, resetTranscript]);
