@@ -10,7 +10,7 @@ import (
 
 // AIProvider defines the interface for AI providers
 type AIProvider interface {
-	GenerateResponse(ctx context.Context, prompt string, conversationHistory []string) (string, int, error)
+	GenerateResponse(ctx context.Context, systemPrompt, prompt string, conversationHistory []string) (string, int, error)
 	GetModel() string
 	GetProvider() string
 }
@@ -42,6 +42,7 @@ func NewMultiProviderBalancer(groq, gemini AIProvider, groqLimit, geminiLimit in
 // HandleChat routes a message to the appropriate AI provider
 func (b *MultiProviderBalancer) HandleChat(
 	ctx context.Context,
+	systemPrompt string,
 	message string,
 	conversationHistory []string,
 	requireDeepLogic bool,
@@ -51,14 +52,14 @@ func (b *MultiProviderBalancer) HandleChat(
 
 	// If deep clinical synthesis or RAG is needed, route to Gemini (Tier 2)
 	if requireDeepLogic || b.groqRPMUsed >= b.groqRPMLimit {
-		return b.callGemini(ctx, message, conversationHistory)
+		return b.callGemini(ctx, systemPrompt, message, conversationHistory)
 	}
 
 	// Try Groq first (Tier 1: Speed)
 	ctxSpeed, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	response, tokens, err := b.groqProvider.GenerateResponse(ctxSpeed, message, conversationHistory)
+	response, tokens, err := b.groqProvider.GenerateResponse(ctxSpeed, systemPrompt, message, conversationHistory)
 	if err == nil {
 		b.groqRPMUsed++
 		return response, "groq", tokens, nil
@@ -66,16 +67,16 @@ func (b *MultiProviderBalancer) HandleChat(
 
 	// Fallback to Gemini on Groq timeout or error
 	fmt.Printf("Groq failed (%v), falling back to Gemini\n", err)
-	return b.callGemini(ctx, message, conversationHistory)
+	return b.callGemini(ctx, systemPrompt, message, conversationHistory)
 }
 
 // callGemini calls Gemini provider with rate limiting
-func (b *MultiProviderBalancer) callGemini(ctx context.Context, message string, conversationHistory []string) (string, string, int, error) {
+func (b *MultiProviderBalancer) callGemini(ctx context.Context, systemPrompt, message string, conversationHistory []string) (string, string, int, error) {
 	if b.geminiRPMUsed >= b.geminiRPMLimit {
 		return "", "", 0, fmt.Errorf("gemini rate limit reached (limit: %d)", b.geminiRPMLimit)
 	}
 
-	response, tokens, err := b.geminiProvider.GenerateResponse(ctx, message, conversationHistory)
+	response, tokens, err := b.geminiProvider.GenerateResponse(ctx, systemPrompt, message, conversationHistory)
 	if err != nil {
 		return "", "", 0, err
 	}
