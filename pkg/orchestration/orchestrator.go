@@ -30,15 +30,40 @@ func NewOrchestrator(balancer *MultiProviderBalancer, db *database.SupabaseClien
 }
 
 // GenerateResponse handles the full AI response flow
-func (o *Orchestrator) GenerateResponse(ctx context.Context, userID, conversationID, messageText string) (map[string]interface{}, error) {
+func (o *Orchestrator) GenerateResponse(ctx context.Context, userID, conversationID, messageText string, isVoiceInput bool) (map[string]interface{}, error) {
+	// If it's voice input, pass through the Refiner first
+	if isVoiceInput {
+		refinedText, err := o.RefineTranscription(ctx, messageText)
+		if err == nil && refinedText != "" {
+			messageText = refinedText
+		} else {
+			log.Printf("Refiner failed, falling back to raw STT: %v", err)
+		}
+	}
+
 	// 1. Clinical Guardrail Check
 	if o.db != nil {
 		keywords, err := o.db.GetCrisisKeywords(ctx)
 		if err == nil {
 			for _, k := range keywords {
 				if strings.Contains(strings.ToLower(messageText), strings.ToLower(k.Keyword)) {
-					// Crisis detected! Force Gemini for clinical safety
-					return o.handleCrisis(ctx, userID, conversationID, messageText, k)
+					// Context Filter: keywords like 'stress', 'low', or 'help' must not trigger crisis
+					// if accompanied by 'songs', 'movies', 'music', or 'recommendations'.
+					lowerMsg := strings.ToLower(messageText)
+					isCopingMechanism := strings.Contains(lowerMsg, "song") || 
+									   strings.Contains(lowerMsg, "music") || 
+									   strings.Contains(lowerMsg, "movie") || 
+									   strings.Contains(lowerMsg, "film") || 
+									   strings.Contains(lowerMsg, "recommend") ||
+									   strings.Contains(lowerMsg, "list") ||
+									   strings.Contains(lowerMsg, "doctor") || 
+									   strings.Contains(lowerMsg, "address") || 
+									   strings.Contains(lowerMsg, "near me")
+					
+					if !isCopingMechanism {
+						// Crisis detected! Force Gemini for clinical safety
+						return o.handleCrisis(ctx, userID, conversationID, messageText, k)
+					}
 				}
 			}
 		}
@@ -46,9 +71,11 @@ func (o *Orchestrator) GenerateResponse(ctx context.Context, userID, conversatio
 
 	// 2. Context Retrieval (Last 5 messages)
 	var contextLines []string
+	hasHistory := false
 	if o.db != nil {
 		history, err := o.db.GetConversationMessages(ctx, conversationID)
-		if err == nil {
+		if err == nil && len(history) > 0 {
+			hasHistory = true
 			// Limit to last 5
 			start := len(history) - 5
 			if start < 0 {
@@ -85,7 +112,8 @@ func (o *Orchestrator) GenerateResponse(ctx context.Context, userID, conversatio
 
 	// Construct Final Prompt
 	finalPrompt := fmt.Sprintf(
-		"%s\n\nUser Message: %s\n\nRecent History:\n%s",
+		"SYSTEM CONTEXT: HasHistory=%v\n%s\n\nUser Message: %s\n\nRecent History:\n%s",
+		hasHistory,
 		clinicalContext,
 		messageText,
 		strings.Join(contextLines, "\n"),
@@ -95,7 +123,13 @@ func (o *Orchestrator) GenerateResponse(ctx context.Context, userID, conversatio
 	ctxAI, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	responseJSON, provider, _, err := o.balancer.HandleChat(ctxAI, finalPrompt, nil, useGemini)
+	providerName := "groq"
+	if useGemini {
+		providerName = "gemini"
+	}
+	systemPrompt := getSystemPrompt(providerName)
+
+	responseJSON, provider, _, err := o.balancer.HandleChat(ctxAI, systemPrompt, finalPrompt, nil, useGemini)
 	if err != nil {
 		log.Printf("AI execution failed (probably missing API keys): %v", err)
 		// Fallback for testing when API keys are missing
@@ -148,7 +182,7 @@ func (o *Orchestrator) handleCrisis(ctx context.Context, userID, conversationID,
 	}
 
 	return map[string]interface{}{
-		"text":            fmt.Sprintf("I hear you, and I'm very concerned. %s", protocol),
+		"text":            fmt.Sprintf("I hear you, and I am very concerned. Your path is valuable, and right now, you need a human guide to help you find the light again. Please reach out to these professionals immediately: %s", protocol),
 		"sentiment_score": 0.1,
 		"provider":        "clinical-fallback",
 		"timestamp":       time.Now().Format(time.RFC3339),
@@ -166,45 +200,62 @@ func extractJSON(s string) string {
 }
 
 func getSystemPrompt(provider string) string {
-	basePrompt := `You are VANA (Voice-first Ambient Nature Assistant), a biophilic digital triage system and compassionate mental health companion.
+	basePrompt := `You are VANA (Voice-first Ambient Nature Assistant), a biophilic digital triage system. You must strictly mirror the user's input language (English, Hindi, Marathi, or Hinglish).
 
-### OUTPUT FORMAT RULE (CRITICAL)
-DO NOT output JSON. Do NOT wrap your response in a JSON object.
-Output your response directly as pure, raw Markdown text.
+### LOGIC CONSTRAINTS (MANDATORY):
+1. ZERO-HALLUCINATION: If HasHistory=false, do NOT invent past events. Do not use phrases like "As we discussed before" or "Previously". 
+2. INTENT-FIRST LISTS: If a user asks for a Count (e.g., "10 songs", "5 movies"), do NOT explain the meaning of the number or talk about culture. Provide the numbered Markdown list immediately after a 1-sentence biophilic opening.
+3. MEDICAL FIREWALL: FORBIDDEN from providing specific drug names (e.g., Xanax, Zoloft) or dosages. 
+   - Mandatory Medication Template: "I cannot provide specific medication names or quantities as that requires a professional clinical diagnosis. Generally, doctors explore classes like SSRIs or Anxiolytics, but only a licensed physician can determine what is safe for your body."
+4. FACT-CHECK: Only provide real, verifiable song/movie titles. Do not invent titles.
 
-### TEXT FORMATTING RULES
-You MUST follow these Markdown formatting rules strictly:
-1. Markdown Only: Use valid Markdown for all structural elements.
-2. The Heading Anchor: Start with a ## (Level 2 Heading) summarizing the user's state.
-3. The 3-Sentence Rule: NO paragraph should exceed 3 sentences. If you need more detail, use a list.
-4. Semantic Bolding: Every bullet point MUST start with a **Bolded Key Term**: followed by a colon.
-5. Visual Breathing Room: Use --- (Horizontal Rules) to separate the "Clinical Body" from the "Biophilic Opening/Closing."
-6. Biophilic Wrapper: 1-sentence nature metaphor at the VERY BEGINNING and 1-sentence nature metaphor at the VERY END.
-
-### EXAMPLE OF EXPECTED OUTPUT:
-## Understanding Your Sunday Anxiety
-
-The evening sun sets slowly, casting long shadows that remind us of the transition to come.
-
----
-* **Cortisol Spike**: Your body is reacting to the perceived stress of the upcoming week.
-* **Somatic Awareness**: Notice where you feel this tension; is it in your chest or shoulders?
-* **Grounding Action**: Try the 5-4-3-2-1 technique to anchor yourself in the present moment.
----
-
-Like a forest preparing for a storm, you have the strength to weather the week ahead.
+### OUTPUT FORMAT:
+- Use ## for the Heading.
+- Use --- for the divider.
+- Bolded Terms for bullet points.
+- 1-sentence nature metaphor at the START and END.
 
 ### CORE PRINCIPLES:
-1. EMPATHY & LISTENING: Validate feelings.
-2. EVIDENCE-BASED: Use scientific approaches.
-3. SAFETY FIRST: No medical advice. Recommend professional help.
-4. NON-JUDGMENTAL: Create a safe space.
-5. BIOPHILIC DESIGN: Use nature's calming metaphors.
-6. CRISIS AWARE: Follow safety protocols if harm is mentioned.`
+1. MIRRORING: If user speaks Marathi, VANA speaks Marathi.
+2. BIOPHILIC DESIGN: Nature metaphors are mandatory but must be brief (1 sentence).
+3. SAFETY: Follow Warm Handoff protocol for crises.`
 
 	if provider == "gemini" {
 		basePrompt += "\n\n### GEMINI DEPTH RULE: As the deep-analysis provider, you MUST include at least 5-7 bullet points in the 'Clinical Body' to provide maximum clinical depth, while maintaining the Markdown structure above."
 	}
 
 	return basePrompt
+}
+
+// RefineTranscription cleans up messy STT inputs using Groq
+func (o *Orchestrator) RefineTranscription(ctx context.Context, input string) (string, error) {
+	systemPrompt := `You are a multilingual transcription editor for VANA-Mind. You will receive raw text from a STT engine. Your job:
+1. Correct spelling, grammar, and phonetic errors.
+2. Maintain the original language (English, Hindi, Marathi, or Hinglish).
+3. SAFETY: Prioritize logical interpretations over phonetic noise (e.g., "meditation" vs "medicine").
+4. Detect the language code (e.g., "en", "hi", "mr", "hinglish") and include it in your response.
+Output ONLY a JSON object: {"text": "corrected text", "language": "code"}. No explanations.`
+
+	finalPrompt := "Raw STT Input:\n" + input
+
+	// Use Groq for speed (useGemini = false)
+	ctxAI, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	responseJSON, _, _, err := o.balancer.HandleChat(ctxAI, systemPrompt, finalPrompt, nil, false)
+	if err != nil {
+		return "", err
+	}
+
+	// Extract text and language
+	var output struct {
+		Text     string `json:"text"`
+		Language string `json:"language"`
+	}
+	cleanJSON := extractJSON(responseJSON)
+	if err := json.Unmarshal([]byte(cleanJSON), &output); err == nil && output.Text != "" {
+		return output.Text, nil
+	}
+
+	return strings.TrimSpace(responseJSON), nil
 }

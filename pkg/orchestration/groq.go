@@ -58,9 +58,9 @@ type groqResponse struct {
 }
 
 // GenerateResponse calls Groq API to generate a response
-func (gc *GroqClient) GenerateResponse(ctx context.Context, prompt string, conversationHistory []string) (string, int, error) {
+func (gc *GroqClient) GenerateResponse(ctx context.Context, systemPrompt, prompt string, conversationHistory []string) (string, int, error) {
 	// Build message history
-	messages := buildMessageHistory(prompt, conversationHistory)
+	messages := buildMessageHistory(systemPrompt, prompt, conversationHistory)
 
 	// Create request
 	payload := groqRequest{
@@ -121,11 +121,11 @@ func (gc *GroqClient) GetProvider() string {
 }
 
 // buildMessageHistory constructs message history for the prompt
-func buildMessageHistory(prompt string, conversationHistory []string) []groqMessage {
+func buildMessageHistory(systemPrompt, prompt string, conversationHistory []string) []groqMessage {
 	messages := []groqMessage{
 		{
 			Role:    "system",
-			Content: getSystemPrompt("groq"),
+			Content: systemPrompt,
 		},
 	}
 
