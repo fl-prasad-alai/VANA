@@ -15,7 +15,6 @@ import CinematicBackground from '../components/CinematicBackground';
 import ThemeToggle from '../components/ThemeToggle';
 import VitalityCore from '../components/VitalityCore';
 import ReactMarkdown from 'react-markdown';
-import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
 
 const SOUNDSCAPE_LIBRARY: Record<string, string> = {
   forest_morning: 'https://raw.githubusercontent.com/CS42org/Nature-sounds/main/Sounds/01_bird/1.mp3',
@@ -89,50 +88,130 @@ const MemoizedMarkdown = React.memo(({ content }: { content: string }) => (
   </div>
 ));
 
-const VoiceInput = ({ onSend, loading, accentBg }: { onSend: (text: string, isVoice: boolean) => void, loading: boolean, accentBg: string }) => {
-  const { transcript, listening, resetTranscript, browserSupportsSpeechRecognition } = useSpeechRecognition();
+const VoiceInput = ({ onSend, loading, accentBg, onListeningChange }: {
+  onSend: (text: string, isVoice: boolean) => void;
+  loading: boolean;
+  accentBg: string;
+  onListeningChange?: (active: boolean) => void;
+}) => {
+  const [isActive, setIsActive] = useState(false);
+  const [transcript, setTranscript] = useState('');
+  const recognitionRef = useRef<any>(null);
   const silenceTimerRef = useRef<any>(null);
+  const transcriptRef = useRef('');
+  const isActiveRef = useRef(false);
 
-  const handleStop = useCallback(() => {
-    SpeechRecognition.stopListening();
-    if (transcript.trim()) {
-      onSend(transcript, true);
+  const isSupported = !!(
+    typeof window !== 'undefined' &&
+    ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)
+  );
+
+  const setActive = useCallback((val: boolean) => {
+    isActiveRef.current = val;
+    setIsActive(val);
+    onListeningChange?.(val);
+  }, [onListeningChange]);
+
+  const clearTimer = useCallback(() => {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
     }
-    resetTranscript();
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-  }, [transcript, onSend, resetTranscript]);
+  }, []);
 
-  const startListening = () => {
-    resetTranscript();
-    SpeechRecognition.startListening({ 
-      continuous: true, 
-      language: 'en-IN' 
-    });
-  };
+  // Nullify the ref BEFORE abort — this breaks the onend→restart loop that keeps the mic alive on prod
+  const killRecognition = useCallback(() => {
+    clearTimer();
+    if (recognitionRef.current) {
+      const rec = recognitionRef.current;
+      recognitionRef.current = null;
+      try { rec.abort(); } catch (_) {}
+    }
+  }, [clearTimer]);
+
+  const forceStop = useCallback((sendText: boolean) => {
+    setActive(false);
+    killRecognition();
+    if (sendText && transcriptRef.current.trim()) {
+      onSend(transcriptRef.current, true);
+    }
+    setTranscript('');
+    transcriptRef.current = '';
+  }, [setActive, killRecognition, onSend]);
+
+  const startMic = useCallback(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    killRecognition();
+
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = 'en-IN';
+
+    rec.onresult = (e: any) => {
+      let full = '';
+      for (let i = 0; i < e.results.length; i++) {
+        full += e.results[i][0].transcript;
+      }
+      setTranscript(full);
+      transcriptRef.current = full;
+    };
+
+    rec.onend = () => {
+      // recognitionRef.current was nullified in killRecognition before abort —
+      // so this check prevents the restart when we intentionally stopped
+      if (recognitionRef.current === rec && isActiveRef.current) {
+        try { rec.start(); } catch (_) {}
+      }
+    };
+
+    rec.onerror = (e: any) => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        setActive(false);
+        clearTimer();
+        recognitionRef.current = null;
+      }
+    };
+
+    recognitionRef.current = rec;
+    try { rec.start(); } catch (_) {}
+  }, [killRecognition, setActive, clearTimer]);
+
+  // Stop as soon as the message starts processing
+  useEffect(() => {
+    if (loading && isActiveRef.current) forceStop(false);
+  }, [loading, forceStop]);
+
+  // 10-second silence timer — resets whenever new speech arrives
+  useEffect(() => {
+    if (!isActive) return;
+    clearTimer();
+    silenceTimerRef.current = setTimeout(() => forceStop(true), 10000);
+    return clearTimer;
+  }, [transcript, isActive, forceStop, clearTimer]);
+
+  // Release mic on unmount
+  useEffect(() => () => killRecognition(), [killRecognition]);
 
   const toggleListening = () => {
-    if (listening) {
-      handleStop();
+    if (isActive) {
+      forceStop(true);
     } else {
-      startListening();
+      setTranscript('');
+      transcriptRef.current = '';
+      setActive(true);
+      startMic();
     }
   };
 
-  useEffect(() => {
-    if (listening) {
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = setTimeout(() => {
-        handleStop();
-      }, 10000);
-    }
-    return () => {
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-    };
-  }, [transcript, listening, handleStop]);
-
-  if (!browserSupportsSpeechRecognition) {
+  if (!isSupported) {
     return (
-      <button disabled className="flex-shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center bg-black/5 text-zinc-400 opacity-50">
+      <button
+        disabled
+        title="Speech recognition not supported in this browser"
+        className="flex-shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center bg-black/5 text-zinc-400 opacity-50 cursor-not-allowed"
+      >
         <MicOff className="w-5 h-5" />
       </button>
     );
@@ -142,27 +221,29 @@ const VoiceInput = ({ onSend, loading, accentBg }: { onSend: (text: string, isVo
     <motion.button
       whileHover={{ scale: 1.05 }}
       whileTap={{ scale: 0.95 }}
-      onClick={toggleListening}
+      onClick={(e) => { e.preventDefault(); toggleListening(); }}
       disabled={loading}
       className={`
         flex-shrink-0 px-4 h-11 rounded-2xl flex items-center justify-center transition-all font-bold text-xs tracking-wider uppercase
-        ${listening
+        ${isActive
           ? `${accentBg} text-white shadow-lg animate-pulse`
           : 'dark:bg-white/5 bg-black/5 text-zinc-400 hover:text-zinc-200'}
       `}
-      title={listening ? "Click to stop" : "Click to speak"}
+      title={isActive ? "Click to stop" : "Click to speak"}
     >
-      {listening ? (
-        <span className="flex items-center gap-2">
-          <Mic className="w-4 h-4 animate-bounce"/> 
-          <span className="hidden md:inline text-[10px]">🌳 VANA is listening...</span>
-        </span>
-      ) : (
-        <span className="flex items-center gap-2">
-          <Mic className="w-4 h-4"/> 
-          <span className="hidden md:inline text-[10px]">Speak to VANA</span>
-        </span>
-      )}
+      <div className="relative">
+        {isActive ? (
+          <span className="flex items-center gap-2">
+            <Mic className="w-4 h-4 animate-bounce text-white"/>
+            <span className="hidden md:inline text-[10px] font-bold tracking-tight">🌳  Listening...</span>
+          </span>
+        ) : (
+          <span className="flex items-center gap-2">
+            <Mic className="w-4 h-4"/>
+            <span className="hidden md:inline text-[10px] tracking-tight">Speak to VANA</span>
+          </span>
+        )}
+      </div>
     </motion.button>
   );
 };
@@ -196,7 +277,7 @@ export const DashboardPage: React.FC = () => {
   const [musicEnabled, setMusicEnabled] = useState(() => localStorage.getItem('vana_music_enabled') !== 'false');
   const [currentTrack, setCurrentTrack] = useState('forest_morning');
   const soundRef = useRef<Howl | null>(null);
-  const { listening } = useSpeechRecognition();
+  const [listening, setListening] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -559,7 +640,7 @@ export const DashboardPage: React.FC = () => {
             </p>
             <div className={`flex items-end gap-3 p-3 rounded-3xl shadow-xl transition-all duration-300 ${isGreening ? 'bg-emerald-950/30 backdrop-blur-xl border border-emerald-500/15' : 'bg-white/60 dark:bg-white/5 backdrop-blur-xl border border-black/5 dark:border-white/10'}`}>
               
-              <VoiceInput onSend={sendMessage} loading={loading} accentBg={accentBg} />
+              <VoiceInput onSend={sendMessage} loading={loading} accentBg={accentBg} onListeningChange={setListening} />
 
               <input ref={inputRef} type="text" value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder={'Share what\'s on your mind...'} disabled={loading} className={`flex-1 bg-transparent text-sm placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none resize-none py-2 ml-2 ${isGreening ? 'text-emerald-50' : 'text-zinc-900 dark:text-zinc-100'}`} />
               <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => sendMessage(input, false)} disabled={loading || !input.trim()} className={`flex-shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center transition-all shadow-lg ${input.trim() && !loading ? `${accentBg} text-white` : 'dark:bg-white/5 bg-black/5 text-zinc-400 cursor-not-allowed opacity-50'}`}>
