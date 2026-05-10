@@ -1,12 +1,14 @@
 import 'regenerator-runtime/runtime';
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Leaf, Send, Mic, MicOff, Plus, LogOut, Settings, BarChart3, ChevronRight,
-  Heart, AlertTriangle, MessageCircle, Sparkles,
+  Heart, AlertTriangle, MessageCircle, Sparkles, Volume2, VolumeX
 } from 'lucide-react';
+import { Howl } from 'howler';
 import { useAuth } from '../hooks/useAuth';
 import { useTheme } from '../contexts/ThemeContext';
 import CinematicBackground from '../components/CinematicBackground';
@@ -14,6 +16,14 @@ import ThemeToggle from '../components/ThemeToggle';
 import VitalityCore from '../components/VitalityCore';
 import ReactMarkdown from 'react-markdown';
 import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
+
+const SOUNDSCAPE_LIBRARY: Record<string, string> = {
+  forest_morning: 'https://raw.githubusercontent.com/CS42org/Nature-sounds/main/Sounds/01_bird/1.mp3',
+  monsoon_rain: 'https://raw.githubusercontent.com/CS42org/Nature-sounds/main/Sounds/04_rain/4.mp3',
+  mossy_stream: 'https://raw.githubusercontent.com/CS42org/Nature-sounds/main/Sounds/05_stream/13.mp3',
+  dusk_valley: 'https://raw.githubusercontent.com/CS42org/Nature-sounds/main/Sounds/01_bird/1.mp3',
+  sunlight_canopy: 'https://raw.githubusercontent.com/CS42org/Nature-sounds/main/Sounds/04_rain/4.mp3',
+};
 
 interface Message {
   id: string;
@@ -144,11 +154,13 @@ const VoiceInput = ({ onSend, loading, accentBg }: { onSend: (text: string, isVo
     >
       {listening ? (
         <span className="flex items-center gap-2">
-          <Mic className="w-4 h-4 animate-bounce"/> 🌳 VANA is listening...
+          <Mic className="w-4 h-4 animate-bounce"/> 
+          <span className="hidden md:inline text-[10px]">🌳 VANA is listening...</span>
         </span>
       ) : (
         <span className="flex items-center gap-2">
-          <Mic className="w-4 h-4"/> 🎤 Speak to VANA
+          <Mic className="w-4 h-4"/> 
+          <span className="hidden md:inline text-[10px]">🎤 Speak to VANA</span>
         </span>
       )}
     </motion.button>
@@ -179,10 +191,19 @@ export const DashboardPage: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [isReflecting, setIsReflecting] = useState(false);
+  
+  // Audio State
+  const [musicEnabled, setMusicEnabled] = useState(() => localStorage.getItem('vana_music_enabled') !== 'false');
+  const [currentTrack, setCurrentTrack] = useState('forest_morning');
+  const soundRef = useRef<Howl | null>(null);
+  const { listening } = useSpeechRecognition();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  
+  // Initial Modal State: Prevents audio issues and sets the vibe
+  const [showInitialModal, setShowInitialModal] = useState(true);
 
   useEffect(() => {
     if (!isAuthenticated) navigate('/login');
@@ -197,6 +218,94 @@ export const DashboardPage: React.FC = () => {
     window.addEventListener('scroll', onScroll);
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) navigate('/login');
+  }, [isAuthenticated, navigate]);
+
+  // Audio Engine Management
+  useEffect(() => {
+    if (!musicEnabled || showInitialModal) {
+      if (soundRef.current) {
+        soundRef.current.stop();
+      }
+      return;
+    }
+
+    if (!soundRef.current) {
+      console.log(`[VANA-AUDIO] Initializing: ${currentTrack}`);
+      soundRef.current = new Howl({
+        src: [SOUNDSCAPE_LIBRARY[currentTrack]],
+        html5: false,
+        loop: true,
+        volume: 0.3,
+        onplay: () => console.log('[VANA-AUDIO] Playback active'),
+        onplayerror: (id, err) => console.error('[VANA-AUDIO] Playback error:', err),
+        onloaderror: (id, err) => console.error('[VANA-AUDIO] Load error:', err),
+      });
+      soundRef.current.play();
+    } else {
+      const oldSound = soundRef.current;
+      const newSound = new Howl({
+        src: [SOUNDSCAPE_LIBRARY[currentTrack]],
+        html5: false,
+        loop: true,
+        volume: 0,
+      });
+      
+      newSound.play();
+      newSound.fade(0, 0.3, 3000);
+      oldSound.fade(oldSound.volume(), 0, 3000);
+      setTimeout(() => {
+        oldSound.stop();
+        oldSound.unload();
+      }, 3500);
+      soundRef.current = newSound;
+    }
+
+    return () => {
+      if (soundRef.current) {
+        soundRef.current.stop();
+        soundRef.current.unload();
+      }
+    };
+  }, [musicEnabled, currentTrack, showInitialModal]);
+
+  const selectInitialSoundscape = (track: string) => {
+    setCurrentTrack(track);
+    setShowInitialModal(false);
+    // User gesture occurs here, allowing immediate play
+    if (typeof Howler !== 'undefined' && Howler.ctx) {
+      Howler.ctx.resume();
+    }
+  };
+
+  // Voice Ducking Logic
+  useEffect(() => {
+    if (soundRef.current && musicEnabled) {
+      if (listening) {
+        console.log('[VANA-AUDIO] Ducking audio for voice input');
+        soundRef.current.fade(soundRef.current.volume(), 0, 500);
+      } else {
+        console.log('[VANA-AUDIO] Resuming audio after voice input');
+        soundRef.current.fade(soundRef.current.volume(), 0.2, 1500);
+      }
+    }
+  }, [listening, musicEnabled]);
+
+  const toggleMusic = () => {
+    const newState = !musicEnabled;
+    console.log(`[VANA-AUDIO] Toggling music: ${newState ? 'ON' : 'OFF'}`);
+    setMusicEnabled(newState);
+    localStorage.setItem('vana_music_enabled', String(newState));
+    
+    if (newState && soundRef.current) {
+      if (!soundRef.current.playing()) {
+        console.log('[VANA-AUDIO] Manual play trigger (User Gesture)');
+        soundRef.current.play();
+      }
+    }
+  };
 
   const sendMessage = async (text: string = input, isVoiceInput: boolean = false) => {
     if (!text.trim() || loading) return;
@@ -269,6 +378,57 @@ export const DashboardPage: React.FC = () => {
     <div className={`relative flex flex-col h-screen overflow-hidden font-sans ${isGreening ? 'bg-[#022c22] text-[#ecfdf5]' : 'bg-slate-50 dark:bg-black text-zinc-900 dark:text-zinc-100'}`}>
       <CinematicBackground />
 
+      <AnimatePresence>
+        {showInitialModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-md px-0 md:px-4"
+          >
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className="w-full md:max-w-2xl bg-white/10 dark:bg-zinc-900/40 border-t md:border border-white/20 rounded-t-[2.5rem] md:rounded-[2rem] p-10 md:p-12 shadow-2xl text-center relative"
+            >
+              {/* Mobile Handle */}
+              <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-8 md:hidden" />
+
+              <h2 className="text-2xl md:text-4xl font-bold text-white mb-2 md:mb-4 tracking-tight">
+                Welcome to VANA
+              </h2>
+              <p className="text-zinc-400 text-sm md:text-lg mb-10 md:mb-12 max-w-md mx-auto leading-relaxed">
+                Choose your soundscape
+              </p>
+
+              <div className="grid grid-cols-3 md:grid-cols-3 gap-3 md:gap-4">
+                {[
+                  { id: 'forest_morning', label: 'Deep Forest', icon: Leaf, desc: 'Birds & Soft Wind' },
+                  { id: 'monsoon_rain', label: 'Rain Sanctuary', icon: MessageCircle, desc: 'Gentle Monsoon' },
+                  { id: 'mossy_stream', label: 'Mossy Stream', icon: Heart, desc: 'Flowing Water' }
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => selectInitialSoundscape(item.id)}
+                    className="group relative flex flex-col items-center p-3 md:p-6 rounded-2xl md:rounded-3xl bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all duration-300"
+                  >
+                    <item.icon className="w-5 h-5 md:w-6 md:h-6 mb-2 md:mb-3 text-emerald-400 group-hover:scale-110 transition-transform" />
+                    <span className="text-white text-xs md:text-base font-medium mb-1 md:mb-1">{item.label.split(' ')[0]}</span>
+                    <span className="text-zinc-300 text-[10px] md:text-xs group-hover:text-white transition-colors text-center leading-tight">{item.desc}</span>
+                  </button>
+                ))}
+              </div>
+              
+              <p className="hidden md:block mt-10 text-zinc-500 text-xs italic">
+                Click a path to enter the stillness.
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* NAVBAR */}
       <motion.header
         className={`
@@ -295,6 +455,15 @@ export const DashboardPage: React.FC = () => {
             {user?.fullName?.split(' ')[0] || 'Guest'}
           </span>
           <div className="hidden sm:block w-px h-5 bg-white/10" />
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={toggleMusic}
+            className="p-2 rounded-xl dark:bg-white/5 bg-black/5 text-zinc-500 hover:text-zinc-300 transition-colors"
+            title={musicEnabled ? "Mute Soundscape" : "Unmute Soundscape"}
+          >
+            {musicEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+          </motion.button>
           <ThemeToggle />
           <button onClick={logout} className="ml-2 flex items-center gap-1.5 text-xs font-semibold text-zinc-500 dark:text-zinc-400 hover:text-red-400 transition-colors px-3 py-2 rounded-xl hover:bg-red-500/10">
             <LogOut className="w-4 h-4" />
@@ -383,6 +552,18 @@ export const DashboardPage: React.FC = () => {
 
           {/* Input area */}
           <div className={`px-4 sm:px-8 pb-6 pt-4 border-t ${isGreening ? 'border-emerald-500/10' : 'border-black/5 dark:border-white/5'}`}>
+            <AnimatePresence>
+              {listening && musicEnabled && (
+                <motion.p
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
+                  className="text-[10px] font-mono text-center mb-2 text-zinc-500 italic"
+                >
+                  VANA is listening in the stillness...
+                </motion.p>
+              )}
+            </AnimatePresence>
             <p className={`text-[10px] font-mono text-center mb-4 opacity-50 ${accentClass}`}>
               💚 VANA supports, not replaces, professional care. For immediate help, call 988 (US) or iCall: 9152987821 (India).
             </p>
