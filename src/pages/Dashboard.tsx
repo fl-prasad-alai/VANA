@@ -233,15 +233,11 @@ export const DashboardPage: React.FC = () => {
     }
 
     if (!soundRef.current) {
-      console.log(`[VANA-AUDIO] Initializing: ${currentTrack}`);
       soundRef.current = new Howl({
         src: [SOUNDSCAPE_LIBRARY[currentTrack]],
         html5: false,
         loop: true,
         volume: 0.3,
-        onplay: () => console.log('[VANA-AUDIO] Playback active'),
-        onplayerror: (id, err) => console.error('[VANA-AUDIO] Playback error:', err),
-        onloaderror: (id, err) => console.error('[VANA-AUDIO] Load error:', err),
       });
       soundRef.current.play();
     } else {
@@ -284,10 +280,8 @@ export const DashboardPage: React.FC = () => {
   useEffect(() => {
     if (soundRef.current && musicEnabled) {
       if (listening) {
-        console.log('[VANA-AUDIO] Ducking audio for voice input');
         soundRef.current.fade(soundRef.current.volume(), 0, 500);
       } else {
-        console.log('[VANA-AUDIO] Resuming audio after voice input');
         soundRef.current.fade(soundRef.current.volume(), 0.2, 1500);
       }
     }
@@ -295,15 +289,11 @@ export const DashboardPage: React.FC = () => {
 
   const toggleMusic = () => {
     const newState = !musicEnabled;
-    console.log(`[VANA-AUDIO] Toggling music: ${newState ? 'ON' : 'OFF'}`);
     setMusicEnabled(newState);
     localStorage.setItem('vana_music_enabled', String(newState));
     
-    if (newState && soundRef.current) {
-      if (!soundRef.current.playing()) {
-        console.log('[VANA-AUDIO] Manual play trigger (User Gesture)');
-        soundRef.current.play();
-      }
+    if (newState && soundRef.current && !soundRef.current.playing()) {
+      soundRef.current.play();
     }
   };
 
