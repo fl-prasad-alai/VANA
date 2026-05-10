@@ -104,14 +104,24 @@ const VoiceInput = ({ onSend, loading, accentBg }: { onSend: (text: string, isVo
 
   const startListening = () => {
     resetTranscript();
-    SpeechRecognition.startListening({ 
-      continuous: true, 
-      language: 'en-IN' 
-    });
+    console.log('VANA-VOICE: Attempting to start listening...');
+    
+    try {
+      SpeechRecognition.startListening({ 
+        continuous: true, 
+        language: 'en-IN' 
+      }).catch(err => {
+        console.warn('VANA-VOICE: en-IN failed, falling back to default', err);
+        SpeechRecognition.startListening({ continuous: false });
+      });
+    } catch (e) {
+      console.error('VANA-VOICE: Critical failure in startListening', e);
+    }
   };
 
   const toggleListening = () => {
     if (listening) {
+      console.log('VANA-VOICE: Stopping...');
       handleStop();
     } else {
       startListening();
