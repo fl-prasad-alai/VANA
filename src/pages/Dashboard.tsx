@@ -15,7 +15,6 @@ import CinematicBackground from '../components/CinematicBackground';
 import ThemeToggle from '../components/ThemeToggle';
 import VitalityCore from '../components/VitalityCore';
 import ReactMarkdown from 'react-markdown';
-import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
 
 const SOUNDSCAPE_LIBRARY: Record<string, string> = {
   forest_morning: 'https://raw.githubusercontent.com/CS42org/Nature-sounds/main/Sounds/01_bird/1.mp3',
@@ -89,69 +88,124 @@ const MemoizedMarkdown = React.memo(({ content }: { content: string }) => (
   </div>
 ));
 
-const VoiceInput = ({ onSend, loading, accentBg }: { onSend: (text: string, isVoice: boolean) => void, loading: boolean, accentBg: string }) => {
-  const { transcript, resetTranscript, browserSupportsSpeechRecognition } = useSpeechRecognition();
-  // isActive is the SOLE source of truth for the UI — never use `listening` directly.
-  // `listening` from react-speech-recognition has async lag on production and stays `true`
-  // long after abort/stop is called, causing the UI to get stuck.
+const VoiceInput = ({ onSend, loading, accentBg, onListeningChange }: {
+  onSend: (text: string, isVoice: boolean) => void;
+  loading: boolean;
+  accentBg: string;
+  onListeningChange?: (active: boolean) => void;
+}) => {
   const [isActive, setIsActive] = useState(false);
+  const [transcript, setTranscript] = useState('');
+  const recognitionRef = useRef<any>(null);
   const silenceTimerRef = useRef<any>(null);
   const transcriptRef = useRef('');
+  const isActiveRef = useRef(false);
 
-  useEffect(() => { transcriptRef.current = transcript; }, [transcript]);
+  const isSupported = !!(
+    typeof window !== 'undefined' &&
+    ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition)
+  );
 
-  const clearTimer = () => {
+  const setActive = useCallback((val: boolean) => {
+    isActiveRef.current = val;
+    setIsActive(val);
+    onListeningChange?.(val);
+  }, [onListeningChange]);
+
+  const clearTimer = useCallback(() => {
     if (silenceTimerRef.current) {
       clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;
     }
-  };
+  }, []);
 
-  // Single exit point — everything that stops the mic goes through here
-  const forceStop = useCallback((sendText: boolean) => {
-    setIsActive(false);
+  // Nullify the ref BEFORE abort — this breaks the onend→restart loop that keeps the mic alive on prod
+  const killRecognition = useCallback(() => {
     clearTimer();
-    SpeechRecognition.stopListening();
-    SpeechRecognition.abortListening();
+    if (recognitionRef.current) {
+      const rec = recognitionRef.current;
+      recognitionRef.current = null;
+      try { rec.abort(); } catch (_) {}
+    }
+  }, [clearTimer]);
+
+  const forceStop = useCallback((sendText: boolean) => {
+    setActive(false);
+    killRecognition();
     if (sendText && transcriptRef.current.trim()) {
       onSend(transcriptRef.current, true);
     }
-    resetTranscript();
-  }, [onSend, resetTranscript]);
+    setTranscript('');
+    transcriptRef.current = '';
+  }, [setActive, killRecognition, onSend]);
 
-  // Belt-and-suspenders: whenever isActive flips to false, always release the mic
+  const startMic = useCallback(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    killRecognition();
+
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = 'en-IN';
+
+    rec.onresult = (e: any) => {
+      let full = '';
+      for (let i = 0; i < e.results.length; i++) {
+        full += e.results[i][0].transcript;
+      }
+      setTranscript(full);
+      transcriptRef.current = full;
+    };
+
+    rec.onend = () => {
+      // recognitionRef.current was nullified in killRecognition before abort —
+      // so this check prevents the restart when we intentionally stopped
+      if (recognitionRef.current === rec && isActiveRef.current) {
+        try { rec.start(); } catch (_) {}
+      }
+    };
+
+    rec.onerror = (e: any) => {
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        setActive(false);
+        clearTimer();
+        recognitionRef.current = null;
+      }
+    };
+
+    recognitionRef.current = rec;
+    try { rec.start(); } catch (_) {}
+  }, [killRecognition, setActive, clearTimer]);
+
+  // Stop as soon as the message starts processing
   useEffect(() => {
-    if (!isActive) {
-      SpeechRecognition.stopListening();
-      SpeechRecognition.abortListening();
-    }
-  }, [isActive]);
+    if (loading && isActiveRef.current) forceStop(false);
+  }, [loading, forceStop]);
 
-  // Stop when message starts processing (loading = true)
-  useEffect(() => {
-    if (loading && isActive) forceStop(false);
-  }, [loading, isActive, forceStop]);
-
-  // 10-second silence timer — resets on each new transcript chunk
+  // 10-second silence timer — resets whenever new speech arrives
   useEffect(() => {
     if (!isActive) return;
     clearTimer();
     silenceTimerRef.current = setTimeout(() => forceStop(true), 10000);
     return clearTimer;
-  }, [transcript, isActive, forceStop]);
+  }, [transcript, isActive, forceStop, clearTimer]);
+
+  // Release mic on unmount
+  useEffect(() => () => killRecognition(), [killRecognition]);
 
   const toggleListening = () => {
     if (isActive) {
       forceStop(true);
     } else {
-      resetTranscript();
-      setIsActive(true);
-      SpeechRecognition.startListening({ continuous: true, language: 'en-IN' })
-        .catch(() => SpeechRecognition.startListening({ continuous: false }));
+      setTranscript('');
+      transcriptRef.current = '';
+      setActive(true);
+      startMic();
     }
   };
 
-  if (!browserSupportsSpeechRecognition) {
+  if (!isSupported) {
     return (
       <button
         disabled
@@ -223,7 +277,7 @@ export const DashboardPage: React.FC = () => {
   const [musicEnabled, setMusicEnabled] = useState(() => localStorage.getItem('vana_music_enabled') !== 'false');
   const [currentTrack, setCurrentTrack] = useState('forest_morning');
   const soundRef = useRef<Howl | null>(null);
-  const { listening } = useSpeechRecognition();
+  const [listening, setListening] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -586,7 +640,7 @@ export const DashboardPage: React.FC = () => {
             </p>
             <div className={`flex items-end gap-3 p-3 rounded-3xl shadow-xl transition-all duration-300 ${isGreening ? 'bg-emerald-950/30 backdrop-blur-xl border border-emerald-500/15' : 'bg-white/60 dark:bg-white/5 backdrop-blur-xl border border-black/5 dark:border-white/10'}`}>
               
-              <VoiceInput onSend={sendMessage} loading={loading} accentBg={accentBg} />
+              <VoiceInput onSend={sendMessage} loading={loading} accentBg={accentBg} onListeningChange={setListening} />
 
               <input ref={inputRef} type="text" value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder={'Share what\'s on your mind...'} disabled={loading} className={`flex-1 bg-transparent text-sm placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none resize-none py-2 ml-2 ${isGreening ? 'text-emerald-50' : 'text-zinc-900 dark:text-zinc-100'}`} />
               <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => sendMessage(input, false)} disabled={loading || !input.trim()} className={`flex-shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center transition-all shadow-lg ${input.trim() && !loading ? `${accentBg} text-white` : 'dark:bg-white/5 bg-black/5 text-zinc-400 cursor-not-allowed opacity-50'}`}>
