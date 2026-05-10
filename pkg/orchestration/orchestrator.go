@@ -155,11 +155,20 @@ func (o *Orchestrator) GenerateResponse(ctx context.Context, userID, conversatio
 		output.SentimentScore = 0.5
 	}
 
+	// Determine suggested track
+	suggestedTrack := "forest_morning"
+	if output.SentimentScore < 0.3 {
+		suggestedTrack = "monsoon_rain"
+	} else if strings.Contains(strings.ToLower(messageText), "sleep") || strings.Contains(strings.ToLower(messageText), "insomnia") {
+		suggestedTrack = "dusk_valley"
+	}
+
 	return map[string]interface{}{
-		"text":            output.Text,
-		"sentiment_score": output.SentimentScore,
-		"provider":        provider,
-		"timestamp":       time.Now().Format(time.RFC3339),
+		"text":                 output.Text,
+		"sentiment_score":      output.SentimentScore,
+		"provider":             provider,
+		"timestamp":            time.Now().Format(time.RFC3339),
+		"suggested_mood_audio": suggestedTrack,
 	}, nil
 }
 
@@ -182,11 +191,12 @@ func (o *Orchestrator) handleCrisis(ctx context.Context, userID, conversationID,
 	}
 
 	return map[string]interface{}{
-		"text":            fmt.Sprintf("I hear you, and I am very concerned. Your path is valuable, and right now, you need a human guide to help you find the light again. Please reach out to these professionals immediately: %s", protocol),
-		"sentiment_score": 0.1,
-		"provider":        "clinical-fallback",
-		"timestamp":       time.Now().Format(time.RFC3339),
-		"crisis":          true,
+		"text":                 fmt.Sprintf("I hear you, and I am very concerned. Your path is valuable, and right now, you need a human guide to help you find the light again. Please reach out to these professionals immediately: %s", protocol),
+		"sentiment_score":      0.1,
+		"provider":             "clinical-fallback",
+		"timestamp":            time.Now().Format(time.RFC3339),
+		"crisis":               true,
+		"suggested_mood_audio": "monsoon_rain", // Heavy rain for crisis situations
 	}, nil
 }
 
