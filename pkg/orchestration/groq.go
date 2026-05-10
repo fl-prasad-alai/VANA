@@ -66,7 +66,7 @@ func (gc *GroqClient) GenerateResponse(ctx context.Context, prompt string, conve
 	payload := groqRequest{
 		Messages:     messages,
 		Model:        gc.model,
-		MaxTokens:    1024,
+		MaxTokens:    2048,
 		Temperature:  0.7,
 		TopP:         0.9,
 		Stream:       false,
@@ -125,7 +125,7 @@ func buildMessageHistory(prompt string, conversationHistory []string) []groqMess
 	messages := []groqMessage{
 		{
 			Role:    "system",
-			Content: getSystemPrompt(),
+			Content: getSystemPrompt("groq"),
 		},
 	}
 
