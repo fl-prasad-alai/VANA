@@ -130,19 +130,40 @@ const VoiceInput = ({ onSend, loading, accentBg }: { onSend: (text: string, isVo
     };
   }, [transcript, listening, handleStop]);
 
+  // Status reporter for production debugging
+  const getStatusText = () => {
+    if (listening) return 'Listening...';
+    if (!browserSupportsSpeechRecognition) return 'Not Supported';
+    return 'Ready';
+  };
+
   if (!browserSupportsSpeechRecognition) {
+    console.warn('VANA-VOICE: Browser does not support speech recognition');
     return (
-      <button disabled className="flex-shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center bg-black/5 text-zinc-400 opacity-50">
+      <button 
+        disabled 
+        title="Speech recognition not supported in this browser"
+        className="flex-shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center bg-black/5 text-zinc-400 opacity-50 cursor-not-allowed"
+      >
         <MicOff className="w-5 h-5" />
       </button>
     );
+  }
+
+  // Production Check: Ensure we are in a secure context (HTTPS)
+  if (!window.isSecureContext) {
+    console.error('VANA-VOICE: Microphone access requires HTTPS on production domains.');
   }
 
   return (
     <motion.button
       whileHover={{ scale: 1.05 }}
       whileTap={{ scale: 0.95 }}
-      onClick={toggleListening}
+      onClick={(e) => {
+        e.preventDefault();
+        console.log('VANA-VOICE: Toggle interaction detected');
+        toggleListening();
+      }}
       disabled={loading}
       className={`
         flex-shrink-0 px-4 h-11 rounded-2xl flex items-center justify-center transition-all font-bold text-xs tracking-wider uppercase
@@ -152,17 +173,19 @@ const VoiceInput = ({ onSend, loading, accentBg }: { onSend: (text: string, isVo
       `}
       title={listening ? "Click to stop" : "Click to speak"}
     >
-      {listening ? (
-        <span className="flex items-center gap-2">
-          <Mic className="w-4 h-4 animate-bounce"/> 
-          <span className="hidden md:inline text-[10px]">🌳 VANA is listening...</span>
-        </span>
-      ) : (
-        <span className="flex items-center gap-2">
-          <Mic className="w-4 h-4"/> 
-          <span className="hidden md:inline text-[10px]">Speak to VANA</span>
-        </span>
-      )}
+      <div className="relative">
+        {listening ? (
+          <span className="flex items-center gap-2">
+            <Mic className="w-4 h-4 animate-bounce text-white"/> 
+            <span className="hidden md:inline text-[10px] font-bold tracking-tight">🌳  Listening...</span>
+          </span>
+        ) : (
+          <span className="flex items-center gap-2">
+            <Mic className="w-4 h-4"/> 
+            <span className="hidden md:inline text-[10px] tracking-tight">Speak to VANA</span>
+          </span>
+        )}
+      </div>
     </motion.button>
   );
 };
