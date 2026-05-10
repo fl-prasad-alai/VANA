@@ -78,11 +78,11 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// Routes
-	mux.HandleFunc("POST /api/auth/register", handleRegister)
-	mux.HandleFunc("POST /api/auth/login", handleLogin)
-	mux.HandleFunc("POST /api/chat", handleChat)
-	mux.HandleFunc("GET /api/health", handleHealth)
+	// Routes (Standard patterns for broader compatibility)
+	mux.HandleFunc("/api/auth/register", handleRegister)
+	mux.HandleFunc("/api/auth/login", handleLogin)
+	mux.HandleFunc("/api/chat", handleChat)
+	mux.HandleFunc("/api/health", handleHealth)
 
 	// CORS Middleware
 	handler := corsMiddleware(mux)
@@ -231,10 +231,20 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleChat(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	var req struct {
 		Message        string `json:"message"`
 		ConversationID string `json:"conversationId"`
 		UserID         string `json:"userId"`
+		IsVoiceInput   bool   `json:"isVoiceInput"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request", http.StatusBadRequest)
@@ -268,7 +278,7 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	result, err := aiOrchestrator.GenerateResponse(ctx, req.UserID, req.ConversationID, req.Message)
+	result, err := aiOrchestrator.GenerateResponse(ctx, req.UserID, req.ConversationID, req.Message, req.IsVoiceInput)
 	if err != nil {
 		log.Printf("Orchestration error: %v", err)
 		http.Error(w, "Failed to generate response", http.StatusInternalServerError)

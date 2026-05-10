@@ -67,7 +67,7 @@ type geminiResponse struct {
 }
 
 // GenerateResponse calls Gemini API to generate a response
-func (gc *GeminiClient) GenerateResponse(ctx context.Context, prompt string, conversationHistory []string) (string, int, error) {
+func (gc *GeminiClient) GenerateResponse(ctx context.Context, systemPrompt, prompt string, conversationHistory []string) (string, int, error) {
 	// Build message contents
 	contents := buildGeminiContents(prompt, conversationHistory)
 
@@ -89,7 +89,7 @@ func (gc *GeminiClient) GenerateResponse(ctx context.Context, prompt string, con
 		Parts: []struct {
 			Text string `json:"text"`
 		}{
-			{Text: getSystemPrompt("gemini")},
+			{Text: systemPrompt},
 		},
 	}
 
