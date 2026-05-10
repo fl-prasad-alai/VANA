@@ -160,7 +160,7 @@ const VoiceInput = ({ onSend, loading, accentBg }: { onSend: (text: string, isVo
       ) : (
         <span className="flex items-center gap-2">
           <Mic className="w-4 h-4"/> 
-          <span className="hidden md:inline text-[10px]">🎤 Speak to VANA</span>
+          <span className="hidden md:inline text-[10px]">Speak to VANA</span>
         </span>
       )}
     </motion.button>
