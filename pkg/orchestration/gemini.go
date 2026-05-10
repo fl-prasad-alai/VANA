@@ -76,7 +76,7 @@ func (gc *GeminiClient) GenerateResponse(ctx context.Context, prompt string, con
 		Contents: contents,
 	}
 
-	payload.GenerationConfig.MaxOutputTokens = 1024
+	payload.GenerationConfig.MaxOutputTokens = 2048
 	payload.GenerationConfig.Temperature = 0.7
 	payload.GenerationConfig.TopP = 0.9
 
@@ -89,7 +89,7 @@ func (gc *GeminiClient) GenerateResponse(ctx context.Context, prompt string, con
 		Parts: []struct {
 			Text string `json:"text"`
 		}{
-			{Text: getSystemPrompt()},
+			{Text: getSystemPrompt("gemini")},
 		},
 	}
 
