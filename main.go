@@ -61,11 +61,11 @@ func main() {
 	geminiKey := os.Getenv("GEMINI_API_KEY")
 	groqModel := os.Getenv("GROQ_MODEL")
 	if groqModel == "" {
-		groqModel = "llama-3.1-8b-instant"
+		groqModel = "openai/gpt-oss-20b"
 	}
 	geminiModel := os.Getenv("GEMINI_MODEL")
 	if geminiModel == "" {
-		geminiModel = "gemini-2.0-flash"
+		geminiModel = "gemini-2.5-flash"
 	}
 
 	log.Printf("[VANA] GROQ key loaded: %s... len=%d model=%s", safePrefix(groqKey), len(groqKey), groqModel)

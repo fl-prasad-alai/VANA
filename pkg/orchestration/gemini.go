@@ -153,6 +153,7 @@ type geminiEmbeddingRequest struct {
 			Text string `json:"text"`
 		} `json:"parts"`
 	} `json:"content"`
+	OutputDimensionality int `json:"outputDimensionality,omitempty"`
 }
 
 // geminiEmbeddingResponse represents Gemini's embedding API response
@@ -164,7 +165,8 @@ type geminiEmbeddingResponse struct {
 
 // GenerateEmbedding calls Gemini API to generate text embeddings
 func (gc *GeminiClient) GenerateEmbedding(ctx context.Context, text string) ([]float64, error) {
-	payload := geminiEmbeddingRequest{}
+	// Must match the clinical_knowledge.embedding vector(768) column
+	payload := geminiEmbeddingRequest{OutputDimensionality: 768}
 	payload.Content.Parts = append(payload.Content.Parts, struct {
 		Text string `json:"text"`
 	}{Text: text})
@@ -174,7 +176,7 @@ func (gc *GeminiClient) GenerateEmbedding(ctx context.Context, text string) ([]f
 		return nil, fmt.Errorf("failed to marshal embedding request: %w", err)
 	}
 
-	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=%s", gc.apiKey)
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key=%s", gc.apiKey)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create embedding request: %w", err)
