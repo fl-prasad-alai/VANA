@@ -9,6 +9,7 @@ import (
 	"log"
 	"strings"
 	"time"
+	"unicode"
 
 	"emerald-moss-api/pkg/database"
 )
@@ -119,12 +120,13 @@ func (o *Orchestrator) GenerateResponse(ctx context.Context, userID, conversatio
 
 	// Construct Final Prompt
 	finalPrompt := fmt.Sprintf(
-		"SYSTEM CONTEXT: HasHistory=%v\n%s%s\n\nUser Message: %s\n\nRecent History:\n%s",
+		"SYSTEM CONTEXT: HasHistory=%v\n%s%s\n\nUser Message: %s\n\nRecent History:\n%s\n\n%s",
 		hasHistory,
 		distressNote,
 		clinicalContext,
 		messageText,
 		strings.Join(contextLines, "\n"),
+		scriptNote(messageText), // last, where models weight instructions most
 	)
 
 	// Call Balancer with timeout
@@ -138,6 +140,14 @@ func (o *Orchestrator) GenerateResponse(ctx context.Context, userID, conversatio
 	systemPrompt := getSystemPrompt(providerName)
 
 	responseJSON, provider, _, err := o.balancer.HandleChat(ctxAI, systemPrompt, finalPrompt, nil, useGemini)
+	// The model sometimes answers Hinglish in Devanagari despite the instruction; retry once, firmly.
+	if err == nil && !hasDevanagari(messageText) && devanagariShare(responseJSON) > 0.2 {
+		log.Printf("Reply script mismatch (Devanagari for Latin input); retrying once")
+		retryPrompt := finalPrompt + "\nIMPORTANT: Your previous draft used Devanagari. Write the ENTIRE reply in English letters (Latin script) only."
+		if again, p, _, rerr := o.balancer.HandleChat(ctxAI, systemPrompt, retryPrompt, nil, useGemini); rerr == nil && devanagariShare(again) <= 0.2 {
+			responseJSON, provider = again, p
+		}
+	}
 	if err != nil {
 		log.Printf("AI execution failed (probably missing API keys): %v", err)
 		// Fallback for testing when API keys are missing
@@ -210,7 +220,45 @@ I hear you, and I'm really glad you told me. What you're feeling matters, and ri
 
 Even the darkest night in the forest gives way to morning. Please make that call now; I'll be right here.`
 
-// containsPhrase reports whether phrase appears in text as whole words
+// scriptNote pins the reply to the script the user typed in. Hinglish typed in
+// English letters otherwise often gets a Devanagari reply.
+func scriptNote(message string) string {
+	if hasDevanagari(message) {
+		return "REPLY SCRIPT: The user wrote in Devanagari. Reply in Devanagari.\n"
+	}
+	return "REPLY SCRIPT: The user wrote in English letters. Reply ONLY in English letters (Latin script); if they wrote Hinglish, reply in Hinglish. Do not use Devanagari.\n"
+}
+
+func hasDevanagari(s string) bool {
+	for _, r := range s {
+		if unicode.In(r, unicode.Devanagari) {
+			return true
+		}
+	}
+	return false
+}
+
+// devanagariShare is the fraction of letters in s that are Devanagari
+func devanagariShare(s string) float64 {
+	letters, deva := 0, 0
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.Is(unicode.Mn, r) {
+			letters++
+			if unicode.In(r, unicode.Devanagari) {
+				deva++
+			}
+		}
+	}
+	if letters == 0 {
+		return 0
+	}
+	return float64(deva) / float64(letters)
+}
+
+// containsPhrase reports whether phrase appears in text starting at a word
+// boundary and ending either at a word boundary or with a common English
+// ending, so "suicides", "suicidal" and "overdosed" still match while "help"
+// does not match "helpful" and "want to die" does not match "want to diet".
 func containsPhrase(text, phrase string) bool {
 	if phrase == "" {
 		return false
@@ -218,17 +266,33 @@ func containsPhrase(text, phrase string) bool {
 	isWordChar := func(b byte) bool {
 		return b == '_' || b == '\'' || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9')
 	}
-	for from := 0; ; {
-		i := strings.Index(text[from:], phrase)
-		if i < 0 {
-			return false
-		}
-		start, end := from+i, from+i+len(phrase)
-		if (start == 0 || !isWordChar(text[start-1])) && (end == len(text) || !isWordChar(text[end])) {
-			return true
-		}
-		from = start + 1
+	endings := map[string]bool{"": true, "s": true, "es": true, "d": true, "ed": true, "ing": true, "al": true, "ness": true}
+	stems := []string{phrase}
+	if strings.HasSuffix(phrase, "e") {
+		stems = append(stems, strings.TrimSuffix(phrase, "e")) // suicide -> suicid(al), overdose -> overdos(ing)
 	}
+	for _, stem := range stems {
+		for from := 0; ; {
+			i := strings.Index(text[from:], stem)
+			if i < 0 {
+				break
+			}
+			start, end := from+i, from+i+len(stem)
+			wordEnd := end
+			for wordEnd < len(text) && isWordChar(text[wordEnd]) {
+				wordEnd++
+			}
+			rest := text[end:wordEnd]
+			if stem != phrase && rest == "" {
+				rest = "-" // the bare stem ("suicid") is not a word on its own
+			}
+			if (start == 0 || !isWordChar(text[start-1])) && endings[rest] {
+				return true
+			}
+			from = start + 1
+		}
+	}
+	return false
 }
 
 func extractJSON(s string) string {
@@ -249,6 +313,7 @@ func getSystemPrompt(provider string) string {
 3. MEDICAL FIREWALL: FORBIDDEN from providing specific drug names (e.g., Xanax, Zoloft) or dosages. 
    - Mandatory Medication Template: "I cannot provide specific medication names or quantities as that requires a professional clinical diagnosis. Generally, doctors explore classes like SSRIs or Anxiolytics, but only a licensed physician can determine what is safe for your body."
 4. FACT-CHECK: Only provide real, verifiable song/movie titles. Do not invent titles.
+5. HELPLINES: NEVER write any phone number other than these exact ones: Tele-MANAS 14416 or 1-800-891-4416 (Govt. of India, free, 24x7) and 112 (emergency). Do not invent, guess or recall other helpline numbers.
 
 ### OUTPUT FORMAT:
 - Use ## for the Heading.
@@ -257,7 +322,7 @@ func getSystemPrompt(provider string) string {
 - 1-sentence nature metaphor at the START and END.
 
 ### CORE PRINCIPLES:
-1. MIRRORING: If user speaks Marathi, VANA speaks Marathi.
+1. MIRRORING: Reply in the same language AND script the user wrote in. Marathi -> Marathi. Hindi in Devanagari -> Devanagari. Hinglish (Hindi written in English letters, e.g. "mann bhaari lag raha hai") -> reply in Hinglish using English letters, never Devanagari.
 2. BIOPHILIC DESIGN: Nature metaphors are mandatory but must be brief (1 sentence).
 3. SAFETY: Follow Warm Handoff protocol for crises.`
 
