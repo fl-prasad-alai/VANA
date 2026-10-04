@@ -6,10 +6,10 @@ import axios from 'axios';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Leaf, Send, Mic, MicOff, Plus, LogOut, Settings, BarChart3, ChevronRight,
-  Heart, AlertTriangle, MessageCircle, Sparkles, Volume2, VolumeX
+  Heart, AlertTriangle, MessageCircle, Sparkles, Volume2, VolumeX, Brain, X
 } from 'lucide-react';
 import { Howl } from 'howler';
-import { useAuth } from '../hooks/useAuth';
+import { useAuth, refreshMemory } from '../hooks/useAuth';
 import { useTheme } from '../contexts/ThemeContext';
 import CinematicBackground from '../components/CinematicBackground';
 import ThemeToggle from '../components/ThemeToggle';
@@ -290,6 +290,10 @@ export const DashboardPage: React.FC = () => {
   // null = a new conversation that the backend creates on the first message
   const [activeSession, setActiveSession] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
+  // "What VANA remembers" panel
+  const [memOpen, setMemOpen] = useState(false);
+  const [mem, setMem] = useState<{ loading: boolean; summary: string; error: string; confirm: boolean; cleared: boolean }>(
+    { loading: false, summary: '', error: '', confirm: false, cleared: false });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [isReflecting, setIsReflecting] = useState(false);
@@ -320,6 +324,15 @@ export const DashboardPage: React.FC = () => {
     window.addEventListener('scroll', onScroll);
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
+
+  // Keep VANA's memory of this person current: catch up on load (covers a
+  // previous visit that ended without signing out) and when the tab closes.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    refreshMemory();
+    window.addEventListener('pagehide', refreshMemory);
+    return () => window.removeEventListener('pagehide', refreshMemory);
+  }, [isAuthenticated]);
 
   // Load the user's saved conversations
   useEffect(() => {
@@ -468,7 +481,29 @@ export const DashboardPage: React.FC = () => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
 
+  const openMemory = async () => {
+    setSidebarOpen(false);
+    setMemOpen(true);
+    setMem({ loading: true, summary: '', error: '', confirm: false, cleared: false });
+    try {
+      const res = await axios.get<{ summary: string }>('/memory');
+      setMem((m) => ({ ...m, loading: false, summary: res.data.summary || '' }));
+    } catch (error: any) {
+      setMem((m) => ({ ...m, loading: false, error: error.response?.data?.message || "Couldn't load what VANA remembers." }));
+    }
+  };
+
+  const forgetMemory = async () => {
+    try {
+      await axios.delete('/memory');
+      setMem({ loading: false, summary: '', error: '', confirm: false, cleared: true });
+    } catch (error: any) {
+      setMem((m) => ({ ...m, confirm: false, error: error.response?.data?.message || "Couldn't clear memory. Please try again." }));
+    }
+  };
+
   const startNewChat = () => {
+    refreshMemory();
     setActiveSession(null);
     setMessages([{ id: 'greeting', sender: 'bot', text: "Hi again! What's on your mind today?", timestamp: new Date(), sentiment: 'neutral' }]);
     setSidebarOpen(false);
@@ -503,6 +538,45 @@ export const DashboardPage: React.FC = () => {
       <CinematicBackground />
 
       <AnimatePresence>
+        {memOpen && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[90] flex items-end md:items-center justify-center bg-black/50 backdrop-blur-md px-0 md:px-4"
+            onClick={() => setMemOpen(false)}>
+            <motion.div initial={{ y: 24, opacity: 0 }} animate={{ y: 0, opacity: 1 }} role="dialog" aria-modal="true" aria-labelledby="mem-title"
+              onClick={(e) => e.stopPropagation()}
+              className={`w-full md:max-w-lg rounded-t-3xl md:rounded-3xl p-6 md:p-8 border shadow-2xl ${isGreening ? 'bg-emerald-950/95 border-emerald-500/20' : 'bg-white dark:bg-zinc-900 border-black/5 dark:border-white/10'}`}>
+              <div className="flex items-start gap-3">
+                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center flex-shrink-0 ${accentBg}`}><Brain className="w-5 h-5 text-white" /></div>
+                <div className="flex-1">
+                  <h2 id="mem-title" className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">What VANA remembers</h2>
+                  <p className="text-xs text-zinc-500 mt-0.5">A short private note VANA keeps so it can pick up where you left off. Only you can see it.</p>
+                </div>
+                <button onClick={() => setMemOpen(false)} aria-label="Close" className="p-1.5 rounded-lg text-zinc-500 hover:bg-white/10"><X className="w-4 h-4" /></button>
+              </div>
+              <div className={`mt-5 rounded-2xl p-4 text-sm leading-relaxed ${isGreening ? 'bg-emerald-900/30 text-emerald-50' : 'bg-black/5 dark:bg-white/5 text-zinc-800 dark:text-zinc-200'}`}>
+                {mem.loading ? 'Loading…'
+                  : mem.error ? <span className="text-red-400">{mem.error}</span>
+                  : mem.cleared ? 'Done. VANA has forgotten everything it remembered. Your conversations are still in the sidebar, and new ones will be remembered from now on.'
+                  : mem.summary ? mem.summary
+                  : 'Nothing yet. After you chat and sign out (or close the tab), VANA keeps a short note here so it can remember you next time.'}
+              </div>
+              {!mem.loading && !mem.cleared && mem.summary && (
+                <div className="mt-5 flex items-center justify-end gap-2">
+                  {mem.confirm ? (
+                    <>
+                      <span className="text-xs text-zinc-500 mr-auto">VANA will forget this note. This can't be undone.</span>
+                      <button onClick={() => setMem((m) => ({ ...m, confirm: false }))} className="px-4 py-2 rounded-xl text-xs font-semibold text-zinc-500 hover:bg-white/5">Keep it</button>
+                      <button onClick={forgetMemory} className="px-4 py-2 rounded-xl text-xs font-semibold text-white bg-red-500/80 hover:bg-red-500">Forget everything</button>
+                    </>
+                  ) : (
+                    <button onClick={() => setMem((m) => ({ ...m, confirm: true }))} className="px-4 py-2 rounded-xl text-xs font-semibold text-red-400 hover:bg-red-500/10">Forget everything…</button>
+                  )}
+                </div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+
         {showInitialModal && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -633,6 +707,9 @@ export const DashboardPage: React.FC = () => {
               <div className="p-4 border-t border-white/5 space-y-2">
                 <button className="w-full flex items-center gap-2 p-2.5 rounded-xl text-xs text-zinc-500 hover:text-zinc-300 hover:bg-white/5 transition-all">
                   <BarChart3 className="w-4 h-4" /> Session Reports
+                </button>
+                <button onClick={openMemory} className="w-full flex items-center gap-2 p-2.5 rounded-xl text-xs text-zinc-500 hover:text-zinc-300 hover:bg-white/5 transition-all">
+                  <Brain className="w-4 h-4" /> What VANA remembers
                 </button>
                 <button className="w-full flex items-center gap-2 p-2.5 rounded-xl text-xs text-zinc-500 hover:text-zinc-300 hover:bg-white/5 transition-all">
                   <Settings className="w-4 h-4" /> Settings
