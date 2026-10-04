@@ -210,7 +210,10 @@ I hear you, and I'm really glad you told me. What you're feeling matters, and ri
 
 Even the darkest night in the forest gives way to morning. Please make that call now; I'll be right here.`
 
-// containsPhrase reports whether phrase appears in text as whole words
+// containsPhrase reports whether phrase appears in text starting at a word
+// boundary and ending either at a word boundary or with a common English
+// ending, so "suicides", "suicidal" and "overdosed" still match while "help"
+// does not match "helpful" and "want to die" does not match "want to diet".
 func containsPhrase(text, phrase string) bool {
 	if phrase == "" {
 		return false
@@ -218,17 +221,33 @@ func containsPhrase(text, phrase string) bool {
 	isWordChar := func(b byte) bool {
 		return b == '_' || b == '\'' || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9')
 	}
-	for from := 0; ; {
-		i := strings.Index(text[from:], phrase)
-		if i < 0 {
-			return false
-		}
-		start, end := from+i, from+i+len(phrase)
-		if (start == 0 || !isWordChar(text[start-1])) && (end == len(text) || !isWordChar(text[end])) {
-			return true
-		}
-		from = start + 1
+	endings := map[string]bool{"": true, "s": true, "es": true, "d": true, "ed": true, "ing": true, "al": true, "ness": true}
+	stems := []string{phrase}
+	if strings.HasSuffix(phrase, "e") {
+		stems = append(stems, strings.TrimSuffix(phrase, "e")) // suicide -> suicid(al), overdose -> overdos(ing)
 	}
+	for _, stem := range stems {
+		for from := 0; ; {
+			i := strings.Index(text[from:], stem)
+			if i < 0 {
+				break
+			}
+			start, end := from+i, from+i+len(stem)
+			wordEnd := end
+			for wordEnd < len(text) && isWordChar(text[wordEnd]) {
+				wordEnd++
+			}
+			rest := text[end:wordEnd]
+			if stem != phrase && rest == "" {
+				rest = "-" // the bare stem ("suicid") is not a word on its own
+			}
+			if (start == 0 || !isWordChar(text[start-1])) && endings[rest] {
+				return true
+			}
+			from = start + 1
+		}
+	}
+	return false
 }
 
 func extractJSON(s string) string {
