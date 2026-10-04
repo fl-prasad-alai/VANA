@@ -13,6 +13,13 @@ func TestContainsPhrase(t *testing.T) {
 		{"i don't want to live anymore", "don't want to live", true},
 		{"thinking about suicide.", "suicide", true},
 		{"suicidesquad is a movie", "suicide", false},
+		{"there were two suicides nearby", "suicide", true},
+		{"i have been feeling suicidal", "suicide", true},
+		{"i think i overdosed", "overdose", true},
+		{"i keep overdosing", "overdose", true},
+		{"i want to diet this month", "want to die", false},
+		{"so much hopelessness", "hopeless", true},
+		{"i feel helpless", "help", false},
 		{"i feel hopeless", "hopeless", true},
 		{"", "help", false},
 	}
