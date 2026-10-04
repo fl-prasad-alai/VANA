@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/lib/pq"
@@ -38,6 +39,7 @@ func NewSupabaseClient(config SupabaseConfig) (*SupabaseClient, error) {
 		)
 	}
 
+	psqlInfo = withPoolerSafeParams(psqlInfo)
 	db, err := sql.Open("postgres", psqlInfo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
@@ -55,6 +57,23 @@ func NewSupabaseClient(config SupabaseConfig) (*SupabaseClient, error) {
 	}
 
 	return &SupabaseClient{db: db}, nil
+}
+
+// withPoolerSafeParams makes lib/pq send each query in a single round trip.
+// Supabase's transaction pooler (port 6543) can hand the second half of a
+// two-step prepared statement to a different backend, which fails with
+// "bind message supplies N parameters, but prepared statement requires M".
+func withPoolerSafeParams(conn string) string {
+	if strings.Contains(conn, "binary_parameters=") {
+		return conn
+	}
+	if strings.HasPrefix(conn, "postgres://") || strings.HasPrefix(conn, "postgresql://") {
+		if strings.Contains(conn, "?") {
+			return conn + "&binary_parameters=yes"
+		}
+		return conn + "?binary_parameters=yes"
+	}
+	return conn + " binary_parameters=yes"
 }
 
 // GetUserByEmail retrieves a user by email (case-insensitive), including the password hash
@@ -265,6 +284,13 @@ func (sc *SupabaseClient) SearchClinicalKnowledge(ctx context.Context, queryEmbe
 	return results, rows.Err()
 }
 
+// CountClinicalKnowledge counts reviewed knowledge entries available for search
+func (sc *SupabaseClient) CountClinicalKnowledge(ctx context.Context) (int, error) {
+	var n int
+	err := sc.db.QueryRowContext(ctx, `SELECT count(*) FROM public.clinical_knowledge WHERE is_approved_for_delivery = true`).Scan(&n)
+	return n, err
+}
+
 // GetCrisisKeywords retrieves all active crisis keywords
 func (sc *SupabaseClient) GetCrisisKeywords(ctx context.Context) ([]CrisisKeyword, error) {
 	rows, err := sc.db.QueryContext(
@@ -364,6 +390,94 @@ func (sc *SupabaseClient) CheckRateLimit(ctx context.Context, userID string) err
 	}
 
 	return nil
+}
+
+// UserMemory is the remembered context about one person
+type UserMemory struct {
+	FirstName string
+	Summary   string     // empty when nothing is remembered yet
+	CoveredTo *time.Time // newest message already folded into Summary
+}
+
+// GetUserMemory returns the person's first name and remembered context
+func (sc *SupabaseClient) GetUserMemory(ctx context.Context, userID string) (*UserMemory, error) {
+	var fullName string
+	var summary sql.NullString
+	var covered sql.NullTime
+	err := sc.db.QueryRowContext(ctx,
+		`SELECT full_name, memory_summary, memory_updated_at FROM public.users WHERE id = $1`, userID,
+	).Scan(&fullName, &summary, &covered)
+	if err != nil {
+		return nil, err
+	}
+	m := &UserMemory{Summary: summary.String}
+	if f := strings.Fields(fullName); len(f) > 0 {
+		m.FirstName = f[0]
+	}
+	if covered.Valid {
+		m.CoveredTo = &covered.Time
+	}
+	return m, nil
+}
+
+// CountMessagesSince counts the user's messages newer than since (all messages when since is nil)
+func (sc *SupabaseClient) CountMessagesSince(ctx context.Context, userID string, since *time.Time) (int, error) {
+	var n int
+	err := sc.db.QueryRowContext(ctx,
+		`SELECT count(*) FROM public.messages WHERE user_id = $1 AND ($2::timestamptz IS NULL OR created_at > $2)`,
+		userID, since,
+	).Scan(&n)
+	return n, err
+}
+
+// GetMessagesSince returns up to limit of the user's newest messages after since, oldest first
+func (sc *SupabaseClient) GetMessagesSince(ctx context.Context, userID string, since *time.Time, limit int) ([]Message, error) {
+	rows, err := sc.db.QueryContext(ctx,
+		`SELECT id, conversation_id, created_at, sender, content FROM (
+		   SELECT id, conversation_id, created_at, sender, content FROM public.messages
+		   WHERE user_id = $1 AND ($2::timestamptz IS NULL OR created_at > $2)
+		   ORDER BY created_at DESC LIMIT $3
+		 ) recent ORDER BY created_at ASC`,
+		userID, since, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var messages []Message
+	for rows.Next() {
+		var m Message
+		if err := rows.Scan(&m.ID, &m.ConversationID, &m.CreatedAt, &m.Sender, &m.Content); err != nil {
+			return nil, err
+		}
+		messages = append(messages, m)
+	}
+	return messages, rows.Err()
+}
+
+// SaveUserMemory stores a new summary, unless another refresh already moved
+// the memory past prevCoveredTo (then this one is stale and is dropped)
+func (sc *SupabaseClient) SaveUserMemory(ctx context.Context, userID, summary string, prevCoveredTo *time.Time, coveredTo time.Time) (bool, error) {
+	res, err := sc.db.ExecContext(ctx,
+		`UPDATE public.users SET memory_summary = $2, memory_updated_at = $3
+		 WHERE id = $1 AND memory_updated_at IS NOT DISTINCT FROM $4`,
+		userID, summary, coveredTo, prevCoveredTo,
+	)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n == 1, nil
+}
+
+// ClearUserMemory forgets everything remembered about the user. Messages
+// already written stay out of memory; only newer ones are remembered.
+func (sc *SupabaseClient) ClearUserMemory(ctx context.Context, userID string) error {
+	_, err := sc.db.ExecContext(ctx,
+		`UPDATE public.users SET memory_summary = NULL,
+		   memory_updated_at = COALESCE((SELECT max(created_at) FROM public.messages WHERE user_id = $1), now())
+		 WHERE id = $1`, userID)
+	return err
 }
 
 // Close closes the database connection

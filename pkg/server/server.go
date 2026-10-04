@@ -125,6 +125,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/chat", s.requireAuth(s.handleChat))
 	mux.HandleFunc("/api/conversations", s.requireAuth(s.handleListConversations))
 	mux.HandleFunc("/api/conversations/", s.requireAuth(s.handleConversationMessages))
+	mux.HandleFunc("/api/memory", s.requireAuth(s.handleMemory))
 	return corsMiddleware(mux)
 }
 
@@ -372,6 +373,14 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	var title string
 	if conversationID == "" {
+		// A new conversation should start with an up-to-date memory. The app
+		// usually refreshes it already (sign-out, tab close, dashboard load);
+		// this catches anyone who skipped those, and costs nothing otherwise.
+		if s.orch.HasUnsummarised(ctx, userID) {
+			if _, err := s.orch.RefreshMemory(ctx, userID); err != nil {
+				log.Printf("Chat: memory refresh before new conversation failed: %v", err)
+			}
+		}
 		title = makeTitle(message)
 		conv, err := db.CreateConversation(ctx, userID, title)
 		if err != nil {
@@ -384,6 +393,11 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 
 	started := time.Now()
 	result, err := s.orch.GenerateResponse(ctx, userID, conversationID, message, req.IsVoiceInput)
+	if errors.Is(err, orchestration.ErrAIUnavailable) {
+		// Nothing is stored, so the person can simply send the message again
+		writeError(w, http.StatusServiceUnavailable, "VANA needs a short rest. Too many conversations are happening right now, so please try again in a few minutes. If you need to talk to someone now, Tele-MANAS is free and open 24x7 at 14416.")
+		return
+	}
 	if err != nil {
 		log.Printf("Orchestration error: %v", err)
 		writeError(w, http.StatusInternalServerError, "I couldn't respond just now. Please try again.")
@@ -410,7 +424,9 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	if err := db.StoreExchange(ctx, userMsg, aiMsg); err != nil {
 		log.Printf("Chat: storing messages failed for conversation %s: %v", conversationID, err)
 	}
-	if err := db.LogAPIUsage(ctx, userID, "/api/chat", provider, 0); err != nil {
+	tokens, _ := result["_tokens"].(int)
+	delete(result, "_tokens")
+	if err := db.LogAPIUsage(ctx, userID, "/api/chat", provider, tokens); err != nil {
 		log.Printf("Chat: usage log failed: %v", err)
 	}
 
@@ -506,6 +522,44 @@ func (s *Server) handleConversationMessages(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "conversationId": conversationID, "messages": out})
 }
 
+// handleMemory: GET shows what VANA remembers; POST folds new messages into the user's memory (called on
+// sign-out and when the tab closes); DELETE makes VANA forget what it remembers.
+func (s *Server) handleMemory(w http.ResponseWriter, r *http.Request) {
+	db := s.database()
+	if db == nil {
+		writeError(w, http.StatusServiceUnavailable, "VANA is waking up. Please try again in a moment.")
+		return
+	}
+	userID := userIDFrom(r)
+	switch r.Method {
+	case http.MethodGet:
+		mem, err := db.GetUserMemory(r.Context(), userID)
+		if err != nil {
+			log.Printf("Memory read failed for %s: %v", userID, err)
+			writeError(w, http.StatusInternalServerError, "Couldn't load what VANA remembers.")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "summary": mem.Summary, "updatedAt": mem.CoveredTo})
+	case http.MethodPost:
+		updated, err := s.orch.RefreshMemory(r.Context(), userID)
+		if err != nil {
+			log.Printf("Memory refresh failed for %s: %v", userID, err)
+			writeError(w, http.StatusBadGateway, "Couldn't update memory right now.")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true, "updated": updated})
+	case http.MethodDelete:
+		if err := db.ClearUserMemory(r.Context(), userID); err != nil {
+			log.Printf("Memory clear failed for %s: %v", userID, err)
+			writeError(w, http.StatusInternalServerError, "Couldn't clear memory. Please try again.")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed.")
+	}
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "healthy"})
 }
@@ -516,7 +570,7 @@ func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Auth uses Bearer tokens (not cookies), so a wildcard origin is safe here
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, Authorization")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusOK)

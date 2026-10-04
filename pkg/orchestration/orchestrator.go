@@ -5,20 +5,41 @@ package orchestration
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
 	"emerald-moss-api/pkg/database"
 )
 
+// ErrAIUnavailable means no AI provider could answer (usually free-tier limits)
+var ErrAIUnavailable = errors.New("no AI provider available")
+
 // Orchestrator handles the high-level AI logic for VANA
 type Orchestrator struct {
 	balancer *MultiProviderBalancer
 	db       *database.SupabaseClient
 	gemini   *GeminiClient
+
+	knowMu      sync.Mutex
+	knowCount   int
+	knowChecked time.Time
+}
+
+// hasKnowledge reports whether reviewed clinical knowledge exists (re-checked every 10 minutes)
+func (o *Orchestrator) hasKnowledge(ctx context.Context) bool {
+	o.knowMu.Lock()
+	defer o.knowMu.Unlock()
+	if time.Since(o.knowChecked) > 10*time.Minute {
+		if n, err := o.db.CountClinicalKnowledge(ctx); err == nil {
+			o.knowCount, o.knowChecked = n, time.Now()
+		}
+	}
+	return o.knowCount > 0
 }
 
 // NewOrchestrator creates a new orchestrator
@@ -42,64 +63,73 @@ func (o *Orchestrator) GenerateResponse(ctx context.Context, userID, conversatio
 		}
 	}
 
-	// 1. Clinical Guardrail Check
-	// Whole-word/phrase matching so "help" does not fire on "helpful".
-	// High/critical keywords trigger the human handoff; medium/low ones keep the
-	// conversation going but tell the model to respond with extra care.
-	distressNote := ""
-	if o.db != nil {
-		keywords, err := o.db.GetCrisisKeywords(ctx)
-		if err == nil {
-			lowerMsg := strings.ToLower(messageText)
-			// Context Filter: asking for songs, movies, doctors etc. is a coping request, not a crisis.
-			isCopingMechanism := strings.Contains(lowerMsg, "song") ||
-				strings.Contains(lowerMsg, "music") ||
-				strings.Contains(lowerMsg, "movie") ||
-				strings.Contains(lowerMsg, "film") ||
-				strings.Contains(lowerMsg, "recommend") ||
-				strings.Contains(lowerMsg, "list") ||
-				strings.Contains(lowerMsg, "doctor") ||
-				strings.Contains(lowerMsg, "address") ||
-				strings.Contains(lowerMsg, "near me")
-
-			for _, k := range keywords {
-				if !containsPhrase(lowerMsg, strings.ToLower(k.Keyword)) {
-					continue
-				}
-				severity := strings.ToLower(k.Severity)
-				if (severity == "critical" || severity == "high") && !isCopingMechanism {
-					return o.handleCrisis(ctx, userID, conversationID, messageText, k)
-				}
-				if severity == "medium" {
-					distressNote = "\nSAFETY NOTE: The user may be in emotional distress. Validate their feelings first, respond gently, and softly mention that Tele-MANAS (14416, free, 24x7) is available if they want to talk to someone.\n"
-				}
-			}
-		}
-	}
-
-	// 2. Context Retrieval (Last 5 messages)
+	// 1. Conversation history (last 10 messages): used by the crisis check,
+	// question pacing and the prompt
 	var contextLines []string
-	hasHistory := false
+	hasHistory, lastAIAsked, lastAICrisis := false, false, false
 	if o.db != nil {
 		history, err := o.db.GetConversationMessages(ctx, conversationID)
 		if err == nil && len(history) > 0 {
 			hasHistory = true
-			// Limit to last 5
-			start := len(history) - 5
+			start := len(history) - 10
 			if start < 0 {
 				start = 0
 			}
 			for i := start; i < len(history); i++ {
 				contextLines = append(contextLines, fmt.Sprintf("%s: %s", history[i].Sender, history[i].Content))
 			}
+			for i := len(history) - 1; i >= 0; i-- {
+				if history[i].Sender == "ai" {
+					last := strings.TrimSpace(history[i].Content)
+					lastAIAsked = strings.HasSuffix(last, "?")
+					lastAICrisis = isCrisisTemplate(last)
+					break
+				}
+			}
+		}
+	}
+
+	// 2. Clinical Guardrail Check
+	// Whole-word/phrase matching so "help" does not fire on "helpful".
+	// High/critical keywords trigger the human handoff; medium/low ones keep the
+	// conversation going but tell the model to respond with extra care.
+	distressNote := ""
+	keywords := builtinCrisisKeywords
+	if o.db != nil {
+		if dbKeywords, err := o.db.GetCrisisKeywords(ctx); err == nil {
+			keywords = append(dbKeywords, builtinCrisisKeywords...)
+		}
+	}
+	lowerMsg := normalizeIndic(strings.ToLower(messageText))
+	// Context Filter: asking for songs, movies, doctors etc. is a coping request, not a crisis.
+	isCopingMechanism := strings.Contains(lowerMsg, "song") ||
+		strings.Contains(lowerMsg, "music") ||
+		strings.Contains(lowerMsg, "movie") ||
+		strings.Contains(lowerMsg, "film") ||
+		strings.Contains(lowerMsg, "recommend") ||
+		strings.Contains(lowerMsg, "list") ||
+		strings.Contains(lowerMsg, "doctor") ||
+		strings.Contains(lowerMsg, "address") ||
+		strings.Contains(lowerMsg, "near me")
+	for _, k := range keywords {
+		if !containsPhrase(lowerMsg, normalizeIndic(strings.ToLower(k.Keyword))) {
+			continue
+		}
+		severity := strings.ToLower(k.Severity)
+		if (severity == "critical" || severity == "high") && !isCopingMechanism {
+			return o.handleCrisis(ctx, userID, conversationID, messageText, k, lastAICrisis)
+		}
+		if severity == "medium" {
+			distressNote = "\nSAFETY NOTE: The person may be feeling hopeless. Reflect their pain first, then gently and directly ask, in their language, whether they are having thoughts of ending their life, and mention Tele-MANAS 14416 (free, 24x7).\n"
 		}
 	}
 
 	// 3. RAG Integration (Clinical Knowledge)
 	clinicalContext := ""
 	
-	// Generate true embedding using Gemini for RAG
-	if o.db != nil {
+	// Embedding search only when there is reviewed knowledge to search (saves a
+	// Gemini call and its daily quota on every message while the table is empty)
+	if o.db != nil && o.hasKnowledge(ctx) {
 		embedding, embErr := o.gemini.GenerateEmbedding(ctx, messageText)
 		if embErr == nil {
 			knowledge, err := o.db.SearchClinicalKnowledge(ctx, embedding, 2)
@@ -112,20 +142,24 @@ func (o *Orchestrator) GenerateResponse(ctx context.Context, userID, conversatio
 		}
 	}
 
-	// 4. Provider Switching & Execution
-	// Logic: Use Groq for speed unless 'clinical' or 'insight' is mentioned, then use Gemini
-	useGemini := strings.Contains(strings.ToLower(messageText), "clinical") || 
-				 strings.Contains(strings.ToLower(messageText), "insight") ||
-				 strings.Contains(strings.ToLower(messageText), "deep")
+	// 4. Provider: Groq answers; Gemini is only the fallback (its free tier is
+	// ~20 requests a day, so words like "deep" must not route to it)
+	useGemini := false
+	pacingNote := ""
+	if lastAIAsked {
+		pacingNote = "PACING: Your previous reply ended with a question. This time do NOT ask a question; reflect, validate, or offer a short line of presence.\n"
+	}
 
 	// Construct Final Prompt
 	finalPrompt := fmt.Sprintf(
-		"SYSTEM CONTEXT: HasHistory=%v\n%s%s\n\nUser Message: %s\n\nRecent History:\n%s\n\n%s",
+		"SYSTEM CONTEXT: HasHistory=%v\n%s%s%s\n\nUser Message: %s\n\nRecent History:\n%s\n\n%s%s",
 		hasHistory,
+		o.memoryContext(ctx, userID),
 		distressNote,
 		clinicalContext,
 		messageText,
 		strings.Join(contextLines, "\n"),
+		pacingNote,
 		scriptNote(messageText), // last, where models weight instructions most
 	)
 
@@ -139,24 +173,28 @@ func (o *Orchestrator) GenerateResponse(ctx context.Context, userID, conversatio
 	}
 	systemPrompt := getSystemPrompt(providerName)
 
-	responseJSON, provider, _, err := o.balancer.HandleChat(ctxAI, systemPrompt, finalPrompt, nil, useGemini)
+	responseJSON, provider, tokens, err := o.balancer.HandleChat(ctxAI, systemPrompt, finalPrompt, nil, useGemini)
 	// The model sometimes answers Hinglish in Devanagari despite the instruction; retry once, firmly.
 	if err == nil && !hasDevanagari(messageText) && devanagariShare(responseJSON) > 0.2 {
 		log.Printf("Reply script mismatch (Devanagari for Latin input); retrying once")
 		retryPrompt := finalPrompt + "\nIMPORTANT: Your previous draft used Devanagari. Write the ENTIRE reply in English letters (Latin script) only."
-		if again, p, _, rerr := o.balancer.HandleChat(ctxAI, systemPrompt, retryPrompt, nil, useGemini); rerr == nil && devanagariShare(again) <= 0.2 {
+		if again, p, t, rerr := o.balancer.HandleChat(ctxAI, systemPrompt, retryPrompt, nil, useGemini); rerr == nil && devanagariShare(again) <= 0.2 {
 			responseJSON, provider = again, p
+			tokens += t
+		}
+	}
+	// Hindi/Marathi verbs carry gender; a reply that guesses the person's gender is regenerated once
+	if err == nil && guessesGender(responseJSON) {
+		log.Printf("Reply guessed the user's gender; retrying once")
+		retryPrompt := finalPrompt + "\nIMPORTANT: Your previous draft guessed the person's gender in a verb (e.g. 'कर रही हैं', 'sochte ho'). Rewrite using only gender-neutral forms such as 'आपको कैसा लग रहा है', 'आपने...', 'तुम्हाला कसं वाटतंय'."
+		if again, p, t, rerr := o.balancer.HandleChat(ctxAI, systemPrompt, retryPrompt, nil, useGemini); rerr == nil && !guessesGender(again) {
+			responseJSON, provider = again, p
+			tokens += t
 		}
 	}
 	if err != nil {
-		log.Printf("AI execution failed (probably missing API keys): %v", err)
-		// Fallback for testing when API keys are missing
-		return map[string]interface{}{
-			"text":            "I hear you. I'm currently running in 'mock mode' because my AI API keys haven't been configured, but I am still here to support you.",
-			"sentiment_score": 0.5,
-			"provider":        "mock-fallback",
-			"timestamp":       time.Now().Format(time.RFC3339),
-		}, nil
+		log.Printf("AI execution failed on every provider: %v", err)
+		return nil, ErrAIUnavailable
 	}
 
 	// 5. Parse JSON Output
@@ -185,19 +223,20 @@ func (o *Orchestrator) GenerateResponse(ctx context.Context, userID, conversatio
 		"text":                 output.Text,
 		"sentiment_score":      output.SentimentScore,
 		"provider":             provider,
+		"_tokens":              tokens, // removed by the server before replying
 		"timestamp":            time.Now().Format(time.RFC3339),
 		"suggested_mood_audio": suggestedTrack,
 	}, nil
 }
 
-func (o *Orchestrator) handleCrisis(ctx context.Context, userID, conversationID, messageText string, keyword database.CrisisKeyword) (map[string]interface{}, error) {
+func (o *Orchestrator) handleCrisis(ctx context.Context, userID, conversationID, messageText string, keyword database.CrisisKeyword, repeat bool) (map[string]interface{}, error) {
 	// Log crisis to DB
 	if o.db != nil {
 		_ = o.db.UpdateConversationCrisisFlag(ctx, conversationID, true, fmt.Sprintf("Keyword detected: %s", keyword.Keyword))
 	}
 	
 	return map[string]interface{}{
-		"text":                 crisisResponse,
+		"text":                 crisisReply(messageText, repeat),
 		"sentiment_score":      0.1,
 		"provider":             "clinical-fallback",
 		"timestamp":            time.Now().Format(time.RFC3339),
@@ -205,20 +244,6 @@ func (o *Orchestrator) handleCrisis(ctx context.Context, userID, conversationID,
 		"suggested_mood_audio": "monsoon_rain", // Heavy rain for crisis situations
 	}, nil
 }
-
-// crisisResponse is shown verbatim when a high-severity crisis keyword is detected.
-// It is deliberately not model-generated so the helplines are always exact.
-const crisisResponse = `## You don't have to carry this alone
-
----
-
-I hear you, and I'm really glad you told me. What you're feeling matters, and right now you deserve a real person beside you, not just me.
-
-- **Tele-MANAS (Govt. of India):** call **14416** or **1-800-891-4416**. Free, confidential, 24x7, in your language.
-- **In immediate danger:** call **112** or go to the nearest hospital emergency.
-- **Reach out to someone you trust:** a friend, family member or neighbour, and tell them how you're feeling right now.
-
-Even the darkest night in the forest gives way to morning. Please make that call now; I'll be right here.`
 
 // scriptNote pins the reply to the script the user typed in. Hinglish typed in
 // English letters otherwise often gets a Devanagari reply.
@@ -302,35 +327,6 @@ func extractJSON(s string) string {
 		return s
 	}
 	return s[start : end+1]
-}
-
-func getSystemPrompt(provider string) string {
-	basePrompt := `You are VANA (Voice-first Ambient Nature Assistant), a biophilic digital triage system. You must strictly mirror the user's input language (English, Hindi, Marathi, or Hinglish).
-
-### LOGIC CONSTRAINTS (MANDATORY):
-1. ZERO-HALLUCINATION: If HasHistory=false, do NOT invent past events. Do not use phrases like "As we discussed before" or "Previously". 
-2. INTENT-FIRST LISTS: If a user asks for a Count (e.g., "10 songs", "5 movies"), do NOT explain the meaning of the number or talk about culture. Provide the numbered Markdown list immediately after a 1-sentence biophilic opening.
-3. MEDICAL FIREWALL: FORBIDDEN from providing specific drug names (e.g., Xanax, Zoloft) or dosages. 
-   - Mandatory Medication Template: "I cannot provide specific medication names or quantities as that requires a professional clinical diagnosis. Generally, doctors explore classes like SSRIs or Anxiolytics, but only a licensed physician can determine what is safe for your body."
-4. FACT-CHECK: Only provide real, verifiable song/movie titles. Do not invent titles.
-5. HELPLINES: NEVER write any phone number other than these exact ones: Tele-MANAS 14416 or 1-800-891-4416 (Govt. of India, free, 24x7) and 112 (emergency). Do not invent, guess or recall other helpline numbers.
-
-### OUTPUT FORMAT:
-- Use ## for the Heading.
-- Use --- for the divider.
-- Bolded Terms for bullet points.
-- 1-sentence nature metaphor at the START and END.
-
-### CORE PRINCIPLES:
-1. MIRRORING: Reply in the same language AND script the user wrote in. Marathi -> Marathi. Hindi in Devanagari -> Devanagari. Hinglish (Hindi written in English letters, e.g. "mann bhaari lag raha hai") -> reply in Hinglish using English letters, never Devanagari.
-2. BIOPHILIC DESIGN: Nature metaphors are mandatory but must be brief (1 sentence).
-3. SAFETY: Follow Warm Handoff protocol for crises.`
-
-	if provider == "gemini" {
-		basePrompt += "\n\n### GEMINI DEPTH RULE: As the deep-analysis provider, you MUST include at least 5-7 bullet points in the 'Clinical Body' to provide maximum clinical depth, while maintaining the Markdown structure above."
-	}
-
-	return basePrompt
 }
 
 // RefineTranscription cleans up messy STT inputs using Groq
