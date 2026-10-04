@@ -42,28 +42,35 @@ func (o *Orchestrator) GenerateResponse(ctx context.Context, userID, conversatio
 	}
 
 	// 1. Clinical Guardrail Check
+	// Whole-word/phrase matching so "help" does not fire on "helpful".
+	// High/critical keywords trigger the human handoff; medium/low ones keep the
+	// conversation going but tell the model to respond with extra care.
+	distressNote := ""
 	if o.db != nil {
 		keywords, err := o.db.GetCrisisKeywords(ctx)
 		if err == nil {
+			lowerMsg := strings.ToLower(messageText)
+			// Context Filter: asking for songs, movies, doctors etc. is a coping request, not a crisis.
+			isCopingMechanism := strings.Contains(lowerMsg, "song") ||
+				strings.Contains(lowerMsg, "music") ||
+				strings.Contains(lowerMsg, "movie") ||
+				strings.Contains(lowerMsg, "film") ||
+				strings.Contains(lowerMsg, "recommend") ||
+				strings.Contains(lowerMsg, "list") ||
+				strings.Contains(lowerMsg, "doctor") ||
+				strings.Contains(lowerMsg, "address") ||
+				strings.Contains(lowerMsg, "near me")
+
 			for _, k := range keywords {
-				if strings.Contains(strings.ToLower(messageText), strings.ToLower(k.Keyword)) {
-					// Context Filter: keywords like 'stress', 'low', or 'help' must not trigger crisis
-					// if accompanied by 'songs', 'movies', 'music', or 'recommendations'.
-					lowerMsg := strings.ToLower(messageText)
-					isCopingMechanism := strings.Contains(lowerMsg, "song") || 
-									   strings.Contains(lowerMsg, "music") || 
-									   strings.Contains(lowerMsg, "movie") || 
-									   strings.Contains(lowerMsg, "film") || 
-									   strings.Contains(lowerMsg, "recommend") ||
-									   strings.Contains(lowerMsg, "list") ||
-									   strings.Contains(lowerMsg, "doctor") || 
-									   strings.Contains(lowerMsg, "address") || 
-									   strings.Contains(lowerMsg, "near me")
-					
-					if !isCopingMechanism {
-						// Crisis detected! Force Gemini for clinical safety
-						return o.handleCrisis(ctx, userID, conversationID, messageText, k)
-					}
+				if !containsPhrase(lowerMsg, strings.ToLower(k.Keyword)) {
+					continue
+				}
+				severity := strings.ToLower(k.Severity)
+				if (severity == "critical" || severity == "high") && !isCopingMechanism {
+					return o.handleCrisis(ctx, userID, conversationID, messageText, k)
+				}
+				if severity == "medium" {
+					distressNote = "\nSAFETY NOTE: The user may be in emotional distress. Validate their feelings first, respond gently, and softly mention that Tele-MANAS (14416, free, 24x7) is available if they want to talk to someone.\n"
 				}
 			}
 		}
@@ -112,8 +119,9 @@ func (o *Orchestrator) GenerateResponse(ctx context.Context, userID, conversatio
 
 	// Construct Final Prompt
 	finalPrompt := fmt.Sprintf(
-		"SYSTEM CONTEXT: HasHistory=%v\n%s\n\nUser Message: %s\n\nRecent History:\n%s",
+		"SYSTEM CONTEXT: HasHistory=%v\n%s%s\n\nUser Message: %s\n\nRecent History:\n%s",
 		hasHistory,
+		distressNote,
 		clinicalContext,
 		messageText,
 		strings.Join(contextLines, "\n"),
@@ -178,26 +186,49 @@ func (o *Orchestrator) handleCrisis(ctx context.Context, userID, conversationID,
 		_ = o.db.UpdateConversationCrisisFlag(ctx, conversationID, true, fmt.Sprintf("Keyword detected: %s", keyword.Keyword))
 	}
 	
-	// Fetch safety protocol
-	protocol := "Please reach out to a professional or a crisis hotline immediately."
-	if o.db != nil {
-		anchors, _ := o.db.GetClinicalAnchors(ctx)
-		for _, a := range anchors {
-			if strings.Contains(strings.ToLower(a.Category), "crisis") {
-				protocol = a.PromptText
-				break
-			}
-		}
-	}
-
 	return map[string]interface{}{
-		"text":                 fmt.Sprintf("I hear you, and I am very concerned. Your path is valuable, and right now, you need a human guide to help you find the light again. Please reach out to these professionals immediately: %s", protocol),
+		"text":                 crisisResponse,
 		"sentiment_score":      0.1,
 		"provider":             "clinical-fallback",
 		"timestamp":            time.Now().Format(time.RFC3339),
 		"crisis":               true,
 		"suggested_mood_audio": "monsoon_rain", // Heavy rain for crisis situations
 	}, nil
+}
+
+// crisisResponse is shown verbatim when a high-severity crisis keyword is detected.
+// It is deliberately not model-generated so the helplines are always exact.
+const crisisResponse = `## You don't have to carry this alone
+
+---
+
+I hear you, and I'm really glad you told me. What you're feeling matters, and right now you deserve a real person beside you, not just me.
+
+- **Tele-MANAS (Govt. of India):** call **14416** or **1-800-891-4416**. Free, confidential, 24x7, in your language.
+- **In immediate danger:** call **112** or go to the nearest hospital emergency.
+- **Reach out to someone you trust:** a friend, family member or neighbour, and tell them how you're feeling right now.
+
+Even the darkest night in the forest gives way to morning. Please make that call now; I'll be right here.`
+
+// containsPhrase reports whether phrase appears in text as whole words
+func containsPhrase(text, phrase string) bool {
+	if phrase == "" {
+		return false
+	}
+	isWordChar := func(b byte) bool {
+		return b == '_' || b == '\'' || (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9')
+	}
+	for from := 0; ; {
+		i := strings.Index(text[from:], phrase)
+		if i < 0 {
+			return false
+		}
+		start, end := from+i, from+i+len(phrase)
+		if (start == 0 || !isWordChar(text[start-1])) && (end == len(text) || !isWordChar(text[end])) {
+			return true
+		}
+		from = start + 1
+	}
 }
 
 func extractJSON(s string) string {

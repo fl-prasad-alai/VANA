@@ -35,16 +35,35 @@ interface Message {
 interface Session {
   id: string;
   label: string;
-  date: string;
-  active?: boolean;
+  updatedAt: string;
 }
 
-const INITIAL_SESSIONS: Session[] = [
-  { id: '1', label: "Today's Session", date: 'Today', active: true },
-  { id: '2', label: 'Anxiety & Work Stress', date: 'Yesterday' },
-  { id: '3', label: 'Sleep Patterns', date: '3 days ago' },
-  { id: '4', label: 'Gratitude Practice', date: 'Last week' },
-];
+interface ApiConversation {
+  id: string;
+  title: string;
+  updatedAt: string;
+}
+
+interface ApiMessage {
+  id: string;
+  sender: 'user' | 'ai';
+  text: string;
+  createdAt: string;
+  sentimentLabel?: Message['sentiment'];
+}
+
+const relativeDate = (iso: string): string => {
+  const then = new Date(iso);
+  const mins = Math.round((Date.now() - then.getTime()) / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  const days = Math.round(hours / 24);
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return `${days} days ago`;
+  return then.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+};
 
 const FADE_UP = {
   hidden: { opacity: 0, y: 14 },
@@ -267,8 +286,10 @@ export const DashboardPage: React.FC = () => {
 
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sessions, setSessions] = useState<Session[]>(INITIAL_SESSIONS);
-  const [activeSession, setActiveSession] = useState('1');
+  const [sessions, setSessions] = useState<Session[]>([]);
+  // null = a new conversation that the backend creates on the first message
+  const [activeSession, setActiveSession] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [isReflecting, setIsReflecting] = useState(false);
@@ -300,9 +321,13 @@ export const DashboardPage: React.FC = () => {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
+  // Load the user's saved conversations
   useEffect(() => {
-    if (!isAuthenticated) navigate('/login');
-  }, [isAuthenticated, navigate]);
+    if (!isAuthenticated) return;
+    axios.get<{ conversations: ApiConversation[] }>('/conversations')
+      .then(res => setSessions(res.data.conversations.map(c => ({ id: c.id, label: c.title, updatedAt: c.updatedAt }))))
+      .catch(() => { /* sidebar simply stays empty; a 401 signs the user out */ });
+  }, [isAuthenticated]);
 
   // Audio Engine Management
   useEffect(() => {
@@ -379,7 +404,7 @@ export const DashboardPage: React.FC = () => {
   };
 
   const sendMessage = async (text: string = input, isVoiceInput: boolean = false) => {
-    if (!text.trim() || loading) return;
+    if (!text.trim() || loading || historyLoading) return;
     const userMsg: Message = { id: Date.now().toString(), sender: 'user', text, timestamp: new Date() };
     setMessages(prev => [...prev, userMsg]);
     if (!isVoiceInput) {
@@ -392,9 +417,18 @@ export const DashboardPage: React.FC = () => {
     try {
       const response = await axios.post('/chat', {
         message: text,
-        conversationId: activeSession,
-        userId: user?.id,
+        conversationId: activeSession ?? undefined,
         isVoiceInput: isVoiceInput,
+      });
+
+      // Keep the sidebar in sync: a new conversation appears, an existing one moves to the top
+      const conversationId: string = response.data.conversationId;
+      const now = new Date().toISOString();
+      setActiveSession(conversationId);
+      setSessions(prev => {
+        const existing = prev.find(s => s.id === conversationId);
+        const label = existing?.label ?? response.data.conversationTitle ?? 'New Conversation';
+        return [{ id: conversationId, label, updatedAt: now }, ...prev.filter(s => s.id !== conversationId)];
       });
 
       let sentiment: 'neutral' | 'positive' | 'negative' | 'critical' = 'neutral';
@@ -418,9 +452,9 @@ export const DashboardPage: React.FC = () => {
     } catch (error: any) {
       console.error('Chat error:', error);
       const isRateLimit = error.response?.status === 429;
-      const errorText = isRateLimit 
+      const errorText = isRateLimit
         ? "I'm receiving too many messages right now. Please take a deep breath and wait a moment."
-        : "I'm having trouble connecting right now. Please try again in a moment.";
+        : error.response?.data?.message || "I'm having trouble connecting right now. Please try again in a moment.";
 
       const botMsg: Message = { id: (Date.now() + 1).toString(), sender: 'bot', text: errorText, timestamp: new Date(), sentiment: 'critical' };
       setMessages(prev => [...prev, botMsg]);
@@ -435,11 +469,30 @@ export const DashboardPage: React.FC = () => {
   };
 
   const startNewChat = () => {
-    const id = Date.now().toString();
-    setSessions(prev => [{ id, label: 'New Conversation', date: 'Just now', active: true }, ...prev.map(s => ({ ...s, active: false }))]);
-    setActiveSession(id);
-    setMessages([{ id: '1', sender: 'bot', text: "Hi again! What's on your mind today?", timestamp: new Date(), sentiment: 'neutral' }]);
+    setActiveSession(null);
+    setMessages([{ id: 'greeting', sender: 'bot', text: "Hi again! What's on your mind today?", timestamp: new Date(), sentiment: 'neutral' }]);
     setSidebarOpen(false);
+  };
+
+  const openSession = async (id: string) => {
+    setSidebarOpen(false);
+    if (id === activeSession || loading) return;
+    setActiveSession(id);
+    setHistoryLoading(true);
+    try {
+      const res = await axios.get<{ messages: ApiMessage[] }>(`/conversations/${id}/messages`);
+      setMessages(res.data.messages.map(m => ({
+        id: m.id,
+        sender: m.sender === 'ai' ? 'bot' : 'user',
+        text: m.text,
+        timestamp: new Date(m.createdAt),
+        sentiment: m.sender === 'ai' ? (m.sentimentLabel ?? 'neutral') : undefined,
+      })));
+    } catch (error: any) {
+      setMessages([{ id: 'load-error', sender: 'bot', text: error.response?.data?.message || "I couldn't open that conversation. Please try again.", timestamp: new Date(), sentiment: 'critical' }]);
+    } finally {
+      setHistoryLoading(false);
+    }
   };
 
   const accentClass = isGreening ? 'text-emerald-400' : isDark ? 'text-violet-400' : 'text-[#e11d48]';
@@ -563,12 +616,15 @@ export const DashboardPage: React.FC = () => {
               </div>
               <div className="px-4 pb-4 flex-1 space-y-1 overflow-y-auto">
                 <p className="text-[10px] font-bold tracking-[0.2em] text-zinc-500 uppercase mb-3 ml-2">Recent Sessions</p>
+                {sessions.length === 0 && (
+                  <p className="text-xs text-zinc-500 ml-2">Your conversations will appear here.</p>
+                )}
                 {sessions.map((s) => (
-                  <motion.button key={s.id} whileHover={{ x: 4 }} onClick={() => { setActiveSession(s.id); setSidebarOpen(false); }} className={`w-full text-left flex items-center gap-3 p-3 rounded-2xl transition-all text-sm ${activeSession === s.id ? isGreening ? 'bg-emerald-500/15 border border-emerald-500/20 text-emerald-100' : 'bg-white/[.06] border border-white/10 dark:text-zinc-100 text-zinc-900' : 'text-zinc-500 dark:text-zinc-500 hover:bg-white/5 hover:text-zinc-300'}`}>
+                  <motion.button key={s.id} whileHover={{ x: 4 }} onClick={() => openSession(s.id)} className={`w-full text-left flex items-center gap-3 p-3 rounded-2xl transition-all text-sm ${activeSession === s.id ? isGreening ? 'bg-emerald-500/15 border border-emerald-500/20 text-emerald-100' : 'bg-white/[.06] border border-white/10 dark:text-zinc-100 text-zinc-900' : 'text-zinc-500 dark:text-zinc-500 hover:bg-white/5 hover:text-zinc-300'}`}>
                     <MessageCircle className="w-4 h-4 flex-shrink-0 opacity-60" />
                     <div className="min-w-0">
                       <p className="font-medium truncate">{s.label}</p>
-                      <p className="text-[10px] text-zinc-500 font-mono">{s.date}</p>
+                      <p className="text-[10px] text-zinc-500 font-mono">{relativeDate(s.updatedAt)}</p>
                     </div>
                     {activeSession === s.id && <ChevronRight className={`w-3 h-3 ml-auto ${accentClass}`} />}
                   </motion.button>
@@ -636,13 +692,13 @@ export const DashboardPage: React.FC = () => {
               )}
             </AnimatePresence>
             <p className={`text-[10px] font-mono text-center mb-4 opacity-50 ${accentClass}`}>
-              💚 VANA supports, not replaces, professional care. For immediate help, call 988 (US) or iCall: 9152987821 (India).
+              💚 VANA supports, not replaces, professional care. For immediate help, call Tele-MANAS 14416 (free, 24x7) or 112 in an emergency.
             </p>
             <div className={`flex items-end gap-3 p-3 rounded-3xl shadow-xl transition-all duration-300 ${isGreening ? 'bg-emerald-950/30 backdrop-blur-xl border border-emerald-500/15' : 'bg-white/60 dark:bg-white/5 backdrop-blur-xl border border-black/5 dark:border-white/10'}`}>
               
               <VoiceInput onSend={sendMessage} loading={loading} accentBg={accentBg} onListeningChange={setListening} />
 
-              <input ref={inputRef} type="text" value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder={'Share what\'s on your mind...'} disabled={loading} className={`flex-1 bg-transparent text-sm placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none resize-none py-2 ml-2 ${isGreening ? 'text-emerald-50' : 'text-zinc-900 dark:text-zinc-100'}`} />
+              <input ref={inputRef} type="text" value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder={historyLoading ? 'Opening conversation...' : 'Share what\'s on your mind...'} disabled={loading || historyLoading} className={`flex-1 bg-transparent text-sm placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none resize-none py-2 ml-2 ${isGreening ? 'text-emerald-50' : 'text-zinc-900 dark:text-zinc-100'}`} />
               <motion.button whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }} onClick={() => sendMessage(input, false)} disabled={loading || !input.trim()} className={`flex-shrink-0 w-11 h-11 rounded-2xl flex items-center justify-center transition-all shadow-lg ${input.trim() && !loading ? `${accentBg} text-white` : 'dark:bg-white/5 bg-black/5 text-zinc-400 cursor-not-allowed opacity-50'}`}>
                 <Send className="w-5 h-5" />
               </motion.button>
