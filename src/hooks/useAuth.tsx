@@ -31,15 +31,6 @@ axios.interceptors.request.use((config) => {
   return config;
 });
 
-// Ask VANA to fold recent conversations into the user's memory. Uses a
-// keepalive request so it still completes while the tab closes or signs out.
-export const refreshMemory = (): void => {
-  const token = localStorage.getItem(TOKEN_KEY);
-  if (!token) return;
-  fetch(`${API_BASE}/memory`, { method: 'POST', keepalive: true, headers: { Authorization: `Bearer ${token}` } })
-    .catch(() => { /* best effort; the server also catches up before the next new conversation */ });
-};
-
 // Older builds stored the user with snake_case keys
 const normalizeUser = (raw: any): User | null => {
   if (!raw || !raw.id) return null;
@@ -133,7 +124,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const logout = useCallback(() => {
-    refreshMemory(); // must run before the token is cleared
     setUser(null);
     setToken(null);
     localStorage.removeItem(TOKEN_KEY);

@@ -5,7 +5,6 @@ package orchestration
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 )
 
@@ -84,21 +83,6 @@ func (b *MultiProviderBalancer) callGemini(ctx context.Context, systemPrompt, me
 
 	b.geminiRPMUsed++
 	return response, "gemini", tokens, nil
-}
-
-// Summarize runs a background summarisation. Groq goes first: the free Gemini
-// tier allows only ~20 requests per model per day, and that budget is kept
-// for live chat fallback. Gemini is used only if Groq fails.
-func (b *MultiProviderBalancer) Summarize(ctx context.Context, systemPrompt, prompt string) (string, error) {
-	b.resetRPMIfNeeded()
-	text, _, err := b.groqProvider.GenerateResponse(ctx, systemPrompt, prompt, nil)
-	if err == nil {
-		b.groqRPMUsed++
-		return text, nil
-	}
-	log.Printf("Memory summary: Groq unavailable (%v), trying Gemini", err)
-	text, _, _, err = b.callGemini(ctx, systemPrompt, prompt, nil)
-	return text, err
 }
 
 // resetRPMIfNeeded resets RPM counters if a minute has passed

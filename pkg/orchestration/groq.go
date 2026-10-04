@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"io"
 	"net/http"
 )
@@ -36,7 +35,6 @@ type groqRequest struct {
 	Temperature        float64       `json:"temperature"`
 	TopP               float64       `json:"top_p"`
 	Stream             bool          `json:"stream"`
-	ReasoningEffort    string        `json:"reasoning_effort,omitempty"`
 }
 
 // groqMessage represents a message in Groq's format
@@ -72,11 +70,6 @@ func (gc *GroqClient) GenerateResponse(ctx context.Context, systemPrompt, prompt
 		Temperature:  0.7,
 		TopP:         0.9,
 		Stream:       false,
-	}
-	// gpt-oss "thinks" before answering and Groq bills those tokens; short
-	// supportive replies don't need deep reasoning, and the free tier is 200k tokens/day
-	if strings.HasPrefix(gc.model, "openai/gpt-oss") {
-		payload.ReasoningEffort = "low"
 	}
 
 	jsonPayload, err := json.Marshal(payload)
