@@ -1,7 +1,60 @@
-# 🌿 VANA (Project Emerald Moss)
-## A Revolutionary Mental Health Companion
+# 🌿 VANA
+## Your AI Mental Health Companion
+
+<p align="center">
+<a href="https://vana-mind.vercel.app"><img src="https://img.shields.io/badge/Try_VANA_live-vana--mind.vercel.app-34d399?style=for-the-badge&labelColor=0a1f16&logo=vercel&logoColor=white" alt="Try VANA live at vana-mind.vercel.app"></a>
+</p>
 
 > **Transitioning from structure to healing.** VANA is a biophilic digital triage system that bridges the clinical gap with nature-inspired design and zero-friction AI support.
+
+---
+
+<div align="center">
+
+### ▶ See VANA in action
+
+<!-- VIDEO-PLAYER: replace this line with the github.com/user-attachments/assets/... link for an inline player -->
+
+<a href="docs/media/VANA-demo.mp4"><img src="docs/readme/vana-demo-preview.gif" alt="VANA demo preview: sign-up, a calm reply, Hinglish, and the crisis safety net" width="720"></a>
+
+<sub>3-minute narrated walkthrough · <a href="docs/media/VANA-demo.mp4"><b>Watch the full video (1080p)</b></a> · <a href="docs/media/VANA-demo.srt">Subtitles</a></sub>
+
+<br><br>
+
+### 📖 The VANA Field Guide
+
+<table>
+<tr>
+<td align="center" valign="middle" width="40%">
+<a href="docs/VANA-Field-Guide.pdf"><img src="docs/readme/guide-flipbook.gif" alt="Flipping through the VANA Field Guide" width="300"></a>
+</td>
+<td valign="middle">
+
+**22 pages, end to end:**
+
+- 🌱 What VANA does, and why
+- 💬 One conversation, start to finish
+- 🛡️ The crisis safety net (Tele-MANAS 14416 · 112)
+- 🧭 Architecture, API and data
+- 🚀 Run it locally and ship it
+
+<a href="docs/VANA-Field-Guide.pdf"><img src="https://img.shields.io/badge/Read_the_guide-PDF-34d399?style=for-the-badge&labelColor=0a1f16" alt="Read the guide"></a>
+<a href="docs/VANA-Field-Guide.pdf?raw=true"><img src="https://img.shields.io/badge/Download-2.7_MB-f3dfa2?style=for-the-badge&labelColor=0a1f16" alt="Download the guide"></a>
+
+</td>
+</tr>
+</table>
+
+<table>
+<tr>
+<td align="center"><a href="docs/VANA-Field-Guide.pdf"><img src="docs/readme/guide-cover.jpg" width="170" alt="Cover"></a><br><sub>Cover</sub></td>
+<td align="center"><a href="docs/VANA-Field-Guide.pdf"><img src="docs/readme/guide-conversation.jpg" width="170" alt="One conversation"></a><br><sub>One conversation</sub></td>
+<td align="center"><a href="docs/VANA-Field-Guide.pdf"><img src="docs/readme/guide-safety.jpg" width="170" alt="The safety net"></a><br><sub>The safety net</sub></td>
+<td align="center"><a href="docs/VANA-Field-Guide.pdf"><img src="docs/readme/guide-architecture.jpg" width="170" alt="Architecture"></a><br><sub>Architecture</sub></td>
+</tr>
+</table>
+
+</div>
 
 ---
 
