@@ -9,6 +9,7 @@ import (
 	"log"
 	"strings"
 	"time"
+	"unicode"
 
 	"emerald-moss-api/pkg/database"
 )
@@ -119,11 +120,12 @@ func (o *Orchestrator) GenerateResponse(ctx context.Context, userID, conversatio
 
 	// Construct Final Prompt
 	finalPrompt := fmt.Sprintf(
-		"SYSTEM CONTEXT: HasHistory=%v\n%s%s\n\nUser Message: %s\n\nRecent History:\n%s",
+		"SYSTEM CONTEXT: HasHistory=%v\n%s%s\n\nUser Message: %s\n%s\nRecent History:\n%s",
 		hasHistory,
 		distressNote,
 		clinicalContext,
 		messageText,
+		scriptNote(messageText),
 		strings.Join(contextLines, "\n"),
 	)
 
@@ -210,6 +212,17 @@ I hear you, and I'm really glad you told me. What you're feeling matters, and ri
 
 Even the darkest night in the forest gives way to morning. Please make that call now; I'll be right here.`
 
+// scriptNote pins the reply to the script the user typed in. Hinglish typed in
+// English letters otherwise often gets a Devanagari reply.
+func scriptNote(message string) string {
+	for _, r := range message {
+		if unicode.In(r, unicode.Devanagari) {
+			return "REPLY SCRIPT: The user wrote in Devanagari. Reply in Devanagari.\n"
+		}
+	}
+	return "REPLY SCRIPT: The user wrote in English letters. Reply ONLY in English letters (Latin script); if they wrote Hinglish, reply in Hinglish. Do not use Devanagari.\n"
+}
+
 // containsPhrase reports whether phrase appears in text starting at a word
 // boundary and ending either at a word boundary or with a common English
 // ending, so "suicides", "suicidal" and "overdosed" still match while "help"
@@ -268,6 +281,7 @@ func getSystemPrompt(provider string) string {
 3. MEDICAL FIREWALL: FORBIDDEN from providing specific drug names (e.g., Xanax, Zoloft) or dosages. 
    - Mandatory Medication Template: "I cannot provide specific medication names or quantities as that requires a professional clinical diagnosis. Generally, doctors explore classes like SSRIs or Anxiolytics, but only a licensed physician can determine what is safe for your body."
 4. FACT-CHECK: Only provide real, verifiable song/movie titles. Do not invent titles.
+5. HELPLINES: NEVER write any phone number other than these exact ones: Tele-MANAS 14416 or 1-800-891-4416 (Govt. of India, free, 24x7) and 112 (emergency). Do not invent, guess or recall other helpline numbers.
 
 ### OUTPUT FORMAT:
 - Use ## for the Heading.
@@ -276,7 +290,7 @@ func getSystemPrompt(provider string) string {
 - 1-sentence nature metaphor at the START and END.
 
 ### CORE PRINCIPLES:
-1. MIRRORING: If user speaks Marathi, VANA speaks Marathi.
+1. MIRRORING: Reply in the same language AND script the user wrote in. Marathi -> Marathi. Hindi in Devanagari -> Devanagari. Hinglish (Hindi written in English letters, e.g. "mann bhaari lag raha hai") -> reply in Hinglish using English letters, never Devanagari.
 2. BIOPHILIC DESIGN: Nature metaphors are mandatory but must be brief (1 sentence).
 3. SAFETY: Follow Warm Handoff protocol for crises.`
 
