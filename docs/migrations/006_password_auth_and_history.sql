@@ -22,3 +22,12 @@ UPDATE public.clinical_anchors
 SET prompt_text = 'If the user mentions self-harm, suicide, or severe distress, immediately acknowledge their pain and provide crisis resources: Tele-MANAS (Govt. of India, free, 24x7): 14416 or 1-800-891-4416. In immediate danger: call 112 or go to the nearest hospital emergency.',
     version = version + 1
 WHERE name = 'crisis_safety' AND prompt_text NOT LIKE '%14416%';
+
+-- 4. Crisis phrasings the original list missed (inflections like "suicidal" or
+--    "overdosed" are handled in code; these differ mid-phrase).
+INSERT INTO public.crisis_keywords (keyword, severity, category)
+SELECT v.keyword, v.severity, 'self-harm'
+FROM (VALUES ('ending my life', 'critical'), ('killing myself', 'critical'),
+             ('hurting myself', 'high'), ('cutting myself', 'high'),
+             ('better off dead', 'high')) AS v(keyword, severity)
+WHERE NOT EXISTS (SELECT 1 FROM public.crisis_keywords k WHERE lower(k.keyword) = v.keyword);
