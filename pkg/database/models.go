@@ -20,6 +20,17 @@ type User struct {
 	ConsentResearch       bool      `json:"consent_research"`
 	LastLogin             *time.Time `json:"last_login"`
 	IsActive              bool      `json:"is_active"`
+	PasswordHash          *string   `json:"-"` // bcrypt; nil for legacy accounts
+}
+
+// ConversationSummary is a row in the user's conversation list
+type ConversationSummary struct {
+	ID             string    `json:"id"`
+	Title          string    `json:"title"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+	MessageCount   int       `json:"messageCount"`
+	CrisisDetected bool      `json:"crisisDetected"`
 }
 
 // Conversation represents a chat session

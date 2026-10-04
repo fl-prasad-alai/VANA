@@ -5,11 +5,16 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"time"
 
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 	"github.com/pgvector/pgvector-go"
 )
+
+// ErrEmailTaken is returned by CreateUser when the email is already registered
+var ErrEmailTaken = errors.New("email already registered")
 
 // SupabaseClient wraps database connections
 type SupabaseClient struct {
@@ -38,25 +43,35 @@ func NewSupabaseClient(config SupabaseConfig) (*SupabaseClient, error) {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 
+	// Serverless-friendly pool: Supabase's transaction pooler does the heavy lifting
+	db.SetMaxOpenConns(5)
+	db.SetMaxIdleConns(2)
+	db.SetConnMaxIdleTime(2 * time.Minute)
+
 	// Test connection
 	if err := db.Ping(); err != nil {
+		db.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
 	return &SupabaseClient{db: db}, nil
 }
 
-// GetUserByEmail retrieves a user by email
+// GetUserByEmail retrieves a user by email (case-insensitive), including the password hash
 func (sc *SupabaseClient) GetUserByEmail(ctx context.Context, email string) (*User, error) {
 	var user User
 	err := sc.db.QueryRowContext(
 		ctx,
-		"SELECT id, created_at, updated_at, email, full_name, COALESCE(encryption_pub_key, ''), privacy_mode, consent_therapeutic, consent_data_collection, consent_research, is_active FROM public.users WHERE email = $1",
+		`SELECT id, created_at, updated_at, email, full_name, COALESCE(encryption_pub_key, ''), COALESCE(privacy_mode, ''),
+		        COALESCE(consent_therapeutic, false), COALESCE(consent_data_collection, false), COALESCE(consent_research, false),
+		        last_login, COALESCE(is_active, true), password_hash
+		 FROM public.users WHERE lower(email) = lower($1)`,
 		email,
 	).Scan(
 		&user.ID, &user.CreatedAt, &user.UpdatedAt, &user.Email, &user.FullName,
 		&user.EncryptionPubKey, &user.PrivacyMode, &user.ConsentTherapeutic,
-		&user.ConsentDataCollection, &user.ConsentResearch, &user.IsActive,
+		&user.ConsentDataCollection, &user.ConsentResearch, &user.LastLogin, &user.IsActive,
+		&user.PasswordHash,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -67,51 +82,118 @@ func (sc *SupabaseClient) GetUserByEmail(ctx context.Context, email string) (*Us
 	return &user, nil
 }
 
-// CreateUser creates a new user in both auth and public schemas
+// CreateUser inserts a new user with a bcrypt password hash.
+// Returns ErrEmailTaken if the email is already registered.
 func (sc *SupabaseClient) CreateUser(ctx context.Context, user *User) error {
+	err := sc.db.QueryRowContext(
+		ctx,
+		`INSERT INTO public.users (id, email, full_name, privacy_mode, consent_therapeutic, consent_data_collection, consent_research, is_active, password_hash)
+		 VALUES ($1, $2, $3, 'encrypted', false, false, false, true, $4)
+		 RETURNING created_at, updated_at, privacy_mode`,
+		user.ID, user.Email, user.FullName, user.PasswordHash,
+	).Scan(&user.CreatedAt, &user.UpdatedAt, &user.PrivacyMode)
+	if err != nil {
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			return ErrEmailTaken
+		}
+		return fmt.Errorf("public.users insert failed: %w", err)
+	}
+	return nil
+}
+
+// TouchLastLogin records a successful login
+func (sc *SupabaseClient) TouchLastLogin(ctx context.Context, userID string) error {
+	_, err := sc.db.ExecContext(ctx, `UPDATE public.users SET last_login = NOW() WHERE id = $1`, userID)
+	return err
+}
+
+// CreateConversation creates a new conversation owned by userID
+func (sc *SupabaseClient) CreateConversation(ctx context.Context, userID, title string) (*Conversation, error) {
+	var conv Conversation
+	err := sc.db.QueryRowContext(
+		ctx,
+		`INSERT INTO public.conversations (user_id, status, ai_provider, title)
+		 VALUES ($1, 'active', 'groq', $2)
+		 RETURNING id, user_id, created_at, updated_at, status, ai_provider, title`,
+		userID, title,
+	).Scan(&conv.ID, &conv.UserID, &conv.CreatedAt, &conv.UpdatedAt, &conv.Status, &conv.AIProvider, &conv.Title)
+	return &conv, err
+}
+
+// UserOwnsConversation reports whether conversationID exists and belongs to userID
+func (sc *SupabaseClient) UserOwnsConversation(ctx context.Context, userID, conversationID string) (bool, error) {
+	var exists bool
+	err := sc.db.QueryRowContext(
+		ctx,
+		`SELECT EXISTS (SELECT 1 FROM public.conversations WHERE id = $1 AND user_id = $2)`,
+		conversationID, userID,
+	).Scan(&exists)
+	return exists, err
+}
+
+// StoreExchange saves the user's message and VANA's reply atomically and bumps the conversation
+func (sc *SupabaseClient) StoreExchange(ctx context.Context, userMsg, aiMsg *Message) error {
 	tx, err := sc.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	// 1. Insert into public.users
-	_, err = tx.ExecContext(
+	for _, m := range []*Message{userMsg, aiMsg} {
+		if _, err := tx.ExecContext(
+			ctx,
+			// clock_timestamp(), not the column default now(): now() is fixed for the whole
+			// transaction, which would give both messages the same time and an unstable order
+			`INSERT INTO public.messages (conversation_id, user_id, sender, content, sentiment_score, sentiment_label,
+			                              ai_model, ai_provider, tokens_used, response_time_ms, contains_crisis_keywords, flagged_for_review, created_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, clock_timestamp())`,
+			m.ConversationID, m.UserID, m.Sender, m.Content, m.SentimentScore, m.SentimentLabel,
+			m.AIModel, m.AIProvider, m.TokensUsed, m.ResponseTimeMs, m.ContainsCrisisKeywords, m.FlaggedForReview,
+		); err != nil {
+			return fmt.Errorf("insert %s message: %w", m.Sender, err)
+		}
+	}
+
+	if _, err := tx.ExecContext(
 		ctx,
-		`INSERT INTO public.users (id, email, full_name, privacy_mode, consent_therapeutic, consent_data_collection, consent_research, is_active)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		user.ID, user.Email, user.FullName, "encrypted", false, false, false, true,
-	)
-	if err != nil {
-		return fmt.Errorf("public.users insert failed: %w", err)
+		`UPDATE public.conversations
+		 SET message_count = COALESCE(message_count, 0) + 2,
+		     ai_provider = COALESCE($2, ai_provider),
+		     updated_at = NOW()
+		 WHERE id = $1`,
+		userMsg.ConversationID, aiMsg.AIProvider,
+	); err != nil {
+		return fmt.Errorf("update conversation: %w", err)
 	}
 
 	return tx.Commit()
 }
 
-// CreateConversation creates a new conversation
-func (sc *SupabaseClient) CreateConversation(ctx context.Context, userID string) (*Conversation, error) {
-	var conv Conversation
-	err := sc.db.QueryRowContext(
+// ListConversations returns the user's conversations, most recently active first
+func (sc *SupabaseClient) ListConversations(ctx context.Context, userID string, limit int) ([]ConversationSummary, error) {
+	rows, err := sc.db.QueryContext(
 		ctx,
-		`INSERT INTO public.conversations (user_id, status, ai_provider) 
-		 VALUES ($1, 'active', 'groq')
-		 RETURNING id, user_id, created_at, updated_at, status, ai_provider`,
-		userID,
-	).Scan(&conv.ID, &conv.UserID, &conv.CreatedAt, &conv.UpdatedAt, &conv.Status, &conv.AIProvider)
-	return &conv, err
-}
-
-// StoreMessage stores a message in the database
-func (sc *SupabaseClient) StoreMessage(ctx context.Context, msg *Message) error {
-	_, err := sc.db.ExecContext(
-		ctx,
-		`INSERT INTO public.messages (conversation_id, user_id, sender, content, sentiment_score, sentiment_label, ai_provider)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		msg.ConversationID, msg.UserID, msg.Sender, msg.Content,
-		msg.SentimentScore, msg.SentimentLabel, msg.AIProvider,
+		`SELECT id, COALESCE(title, 'Conversation'), created_at, updated_at, COALESCE(message_count, 0), COALESCE(crisis_detected, false)
+		 FROM public.conversations
+		 WHERE user_id = $1 AND status <> 'archived'
+		 ORDER BY updated_at DESC
+		 LIMIT $2`,
+		userID, limit,
 	)
-	return err
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	conversations := []ConversationSummary{}
+	for rows.Next() {
+		var c ConversationSummary
+		if err := rows.Scan(&c.ID, &c.Title, &c.CreatedAt, &c.UpdatedAt, &c.MessageCount, &c.CrisisDetected); err != nil {
+			return nil, err
+		}
+		conversations = append(conversations, c)
+	}
+	return conversations, rows.Err()
 }
 
 // GetConversationMessages retrieves all messages in a conversation
