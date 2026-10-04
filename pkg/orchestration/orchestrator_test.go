@@ -29,3 +29,15 @@ func TestContainsPhrase(t *testing.T) {
 		}
 	}
 }
+
+func TestDevanagariShare(t *testing.T) {
+	if got := devanagariShare("Aaj mann bhaari hai"); got != 0 {
+		t.Errorf("latin text share = %v", got)
+	}
+	if got := devanagariShare("आज मन भारी है"); got < 0.99 {
+		t.Errorf("devanagari text share = %v", got)
+	}
+	if hasDevanagari("hello") || !hasDevanagari("hello वन") {
+		t.Error("hasDevanagari wrong")
+	}
+}

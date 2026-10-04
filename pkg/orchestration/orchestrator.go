@@ -120,13 +120,13 @@ func (o *Orchestrator) GenerateResponse(ctx context.Context, userID, conversatio
 
 	// Construct Final Prompt
 	finalPrompt := fmt.Sprintf(
-		"SYSTEM CONTEXT: HasHistory=%v\n%s%s\n\nUser Message: %s\n%s\nRecent History:\n%s",
+		"SYSTEM CONTEXT: HasHistory=%v\n%s%s\n\nUser Message: %s\n\nRecent History:\n%s\n\n%s",
 		hasHistory,
 		distressNote,
 		clinicalContext,
 		messageText,
-		scriptNote(messageText),
 		strings.Join(contextLines, "\n"),
+		scriptNote(messageText), // last, where models weight instructions most
 	)
 
 	// Call Balancer with timeout
@@ -140,6 +140,14 @@ func (o *Orchestrator) GenerateResponse(ctx context.Context, userID, conversatio
 	systemPrompt := getSystemPrompt(providerName)
 
 	responseJSON, provider, _, err := o.balancer.HandleChat(ctxAI, systemPrompt, finalPrompt, nil, useGemini)
+	// The model sometimes answers Hinglish in Devanagari despite the instruction; retry once, firmly.
+	if err == nil && !hasDevanagari(messageText) && devanagariShare(responseJSON) > 0.2 {
+		log.Printf("Reply script mismatch (Devanagari for Latin input); retrying once")
+		retryPrompt := finalPrompt + "\nIMPORTANT: Your previous draft used Devanagari. Write the ENTIRE reply in English letters (Latin script) only."
+		if again, p, _, rerr := o.balancer.HandleChat(ctxAI, systemPrompt, retryPrompt, nil, useGemini); rerr == nil && devanagariShare(again) <= 0.2 {
+			responseJSON, provider = again, p
+		}
+	}
 	if err != nil {
 		log.Printf("AI execution failed (probably missing API keys): %v", err)
 		// Fallback for testing when API keys are missing
@@ -215,12 +223,36 @@ Even the darkest night in the forest gives way to morning. Please make that call
 // scriptNote pins the reply to the script the user typed in. Hinglish typed in
 // English letters otherwise often gets a Devanagari reply.
 func scriptNote(message string) string {
-	for _, r := range message {
-		if unicode.In(r, unicode.Devanagari) {
-			return "REPLY SCRIPT: The user wrote in Devanagari. Reply in Devanagari.\n"
-		}
+	if hasDevanagari(message) {
+		return "REPLY SCRIPT: The user wrote in Devanagari. Reply in Devanagari.\n"
 	}
 	return "REPLY SCRIPT: The user wrote in English letters. Reply ONLY in English letters (Latin script); if they wrote Hinglish, reply in Hinglish. Do not use Devanagari.\n"
+}
+
+func hasDevanagari(s string) bool {
+	for _, r := range s {
+		if unicode.In(r, unicode.Devanagari) {
+			return true
+		}
+	}
+	return false
+}
+
+// devanagariShare is the fraction of letters in s that are Devanagari
+func devanagariShare(s string) float64 {
+	letters, deva := 0, 0
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.Is(unicode.Mn, r) {
+			letters++
+			if unicode.In(r, unicode.Devanagari) {
+				deva++
+			}
+		}
+	}
+	if letters == 0 {
+		return 0
+	}
+	return float64(deva) / float64(letters)
 }
 
 // containsPhrase reports whether phrase appears in text starting at a word
