@@ -1,0 +1,172 @@
+1
+00:00:01,600 --> 00:00:02,410
+This is VANA.
+
+2
+00:00:02,960 --> 00:00:07,974
+In Hindi, VANA means forest. A quiet place to rest your mind,
+
+3
+00:00:07,974 --> 00:00:09,700
+whenever you need it.
+
+4
+00:00:11,000 --> 00:00:17,340
+Millions of people in India carry stress, anxiety and sadness in silence.
+
+5
+00:00:17,890 --> 00:00:22,870
+Therapy can feel expensive, far away, or simply hard to ask for.
+
+6
+00:00:23,420 --> 00:00:26,857
+And the heaviest moments often arrive at two in the morning,
+
+7
+00:00:26,857 --> 00:00:28,690
+when there is no one to talk to.
+
+8
+00:00:30,000 --> 00:00:34,560
+VANA is a calm companion that listens, without judging.
+
+9
+00:00:35,110 --> 00:00:38,179
+Speak or type in English, Hindi, Marathi,
+
+10
+00:00:38,179 --> 00:00:40,425
+or a mix of Hindi and English,
+
+11
+00:00:40,425 --> 00:00:42,970
+and VANA replies in your language.
+
+12
+00:00:43,520 --> 00:00:46,366
+Soft forest sounds play in the background,
+
+13
+00:00:46,366 --> 00:00:50,160
+so every conversation feels like a walk among the trees.
+
+14
+00:00:50,710 --> 00:00:53,339
+And if someone is in danger, VANA pauses,
+
+15
+00:00:53,339 --> 00:00:56,160
+and points them to real people who can help.
+
+16
+00:00:57,902 --> 00:01:03,762
+Let's see it. Asha creates her account, protected by her own password.
+
+17
+00:01:05,963 --> 00:01:10,253
+She chooses a soundscape. Deep forest, today.
+
+18
+00:01:11,206 --> 00:01:13,466
+Then she shares what's on her mind.
+
+19
+00:01:17,777 --> 00:01:21,997
+VANA replies gently, with simple steps she can try tonight.
+
+20
+00:01:23,459 --> 00:01:26,814
+The conversation is saved privately to her account,
+
+21
+00:01:26,814 --> 00:01:28,919
+so she can return to it anytime.
+
+22
+00:01:33,473 --> 00:01:38,313
+Asha can also write the way she speaks, mixing Hindi and English.
+
+23
+00:01:38,313 --> 00:01:42,483
+VANA understands her, and replies in words she can read.
+
+24
+00:01:46,682 --> 00:01:48,862
+Now, the most important part.
+
+25
+00:01:52,572 --> 00:01:57,627
+When a message signals real danger, VANA does not improvise.
+
+26
+00:01:57,627 --> 00:02:00,492
+It shows real, verified helplines.
+
+27
+00:02:01,104 --> 00:02:06,173
+Tele-MANAS, one four four one six. Free, confidential,
+
+28
+00:02:06,173 --> 00:02:11,524
+and open day and night. And one one two, in an emergency.
+
+29
+00:02:14,962 --> 00:02:20,472
+Her privacy holds, too. With the wrong password, no one gets in.
+
+30
+00:02:24,128 --> 00:02:25,898
+Under the hood, VANA is simple.
+
+31
+00:02:26,448 --> 00:02:30,728
+A React app talks to a small Go service, hosted on Vercel.
+
+32
+00:02:31,278 --> 00:02:34,669
+Every message passes a safety check first.
+
+33
+00:02:34,669 --> 00:02:37,415
+Then a fast model on Groq replies,
+
+34
+00:02:37,415 --> 00:02:39,918
+with Google Gemini as a backup.
+
+35
+00:02:40,468 --> 00:02:42,802
+Conversations are stored in Supabase,
+
+36
+00:02:42,802 --> 00:02:45,388
+linked only to the person who wrote them.
+
+37
+00:02:47,695 --> 00:02:49,675
+VANA is built on four promises.
+
+38
+00:02:50,225 --> 00:02:54,937
+Your password is never stored, only a secure fingerprint of it.
+
+39
+00:02:54,937 --> 00:02:57,555
+Your conversations are yours alone.
+
+40
+00:02:58,105 --> 00:03:00,865
+Crisis help is never left to chance.
+
+41
+00:03:00,865 --> 00:03:06,155
+And VANA is here to support, but never to replace, professional care.
+
+42
+00:03:07,961 --> 00:03:10,831
+VANA. A forest for the mind.
+
+43
+00:03:11,381 --> 00:03:14,331
+Take a slow breath. We're listening.
+
